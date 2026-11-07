@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=1920, height=1080, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cinefy TV</title>
+    <link rel="stylesheet" href="app.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Sidebar Navigation -->
+        <div id="sidebar">
+            <div class="logo-container">
+                <img src="assets/logo.png" alt="Cinefy" class="logo-img">
+            </div>
+            <nav class="nav-menu">
+                <button id="nav-home" class="nav-item focusable active" data-view="home" tabindex="0">
+                    <span class="icon">🏠</span> Início
+                </button>
+                <button id="nav-creators" class="nav-item focusable" data-view="creators" tabindex="0">
+                    <span class="icon">👥</span> Criadores
+                </button>
+                <button id="nav-search" class="nav-item focusable" data-view="search" tabindex="0">
+                    <span class="icon">🔍</span> Buscar
+                </button>
+                <button id="nav-account" class="nav-item focusable" data-view="account" tabindex="0">
+                    <span class="icon">👤</span> Minha Conta
+                </button>
+                <button id="nav-reload" class="nav-item focusable" data-action="reload" tabindex="0">
+                    <span class="icon">🔄</span> Atualizar
+                </button>
+            </nav>
+            <div class="sidebar-footer">
+                Cinefy TV v1.0.0<br>Tizen 3.0 Edition
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div id="main-content">
+            <!-- View: Home -->
+            <div id="view-home" class="view-section active">
+                <div class="section-header">
+                    <h2 class="section-title">⭐ Criadores em Destaque</h2>
+                </div>
+                <div id="home-creators-carousel" class="horizontal-carousel">
+                    <div class="spinner"></div>
+                </div>
+
+                <div class="section-header">
+                    <h2 class="section-title">🎁 Vídeos Gratuitos <span class="badge">Acesso Livre</span></h2>
+                </div>
+                <div id="home-free-carousel" class="horizontal-carousel">
+                    <div class="spinner"></div>
+                </div>
+
+                <div class="section-header">
+                    <h2 class="section-title">🔥 Vídeos Recentes na Plataforma</h2>
+                </div>
+                <div id="home-videos-grid" class="video-grid">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+
+            <!-- View: All Creators -->
+            <div id="view-creators" class="view-section">
+                <div class="section-header">
+                    <h2 class="section-title">👥 Todos os Criadores Cinefy</h2>
+                </div>
+                <div id="all-creators-grid" class="horizontal-carousel" style="flex-wrap: wrap; height: auto;">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+
+            <!-- View: Channel Detail -->
+            <div id="view-channel-detail" class="view-section">
+                <div class="channel-banner">
+                    <img id="channel-banner-img" src="" alt="" class="channel-banner-img">
+                    <div class="channel-banner-overlay">
+                        <div class="channel-profile-row">
+                            <div class="channel-avatar-lg">
+                                <img id="channel-avatar-img" src="" alt="">
+                            </div>
+                            <div class="channel-info-text">
+                                <h2 id="channel-title">Canal</h2>
+                                <p id="channel-description"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="channel-tabs">
+                    <button class="channel-tab-btn focusable active" data-tab="recent" tabindex="0">Recentes</button>
+                    <button class="channel-tab-btn focusable" data-tab="popular" tabindex="0">Populares</button>
+                    <button class="channel-tab-btn focusable" data-tab="free" tabindex="0">Gratuitos</button>
+                    <button id="channel-back-btn" class="channel-tab-btn focusable" tabindex="0">⬅ Voltar</button>
+                </div>
+
+                <div id="channel-videos-grid" class="video-grid">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+
+            <!-- View: Search -->
+            <div id="view-search" class="view-section">
+                <div class="section-header">
+                    <h2 class="section-title">🔍 Pesquisar Vídeos e Conteúdos</h2>
+                </div>
+                <div class="search-bar-wrap">
+                    <input type="text" id="search-input-field" class="search-input focusable" placeholder="Digite o que deseja buscar..." tabindex="0">
+                    <button id="search-clear-btn" class="search-clear-btn focusable" tabindex="0">Limpar</button>
+                </div>
+
+                <!-- On-Screen Virtual Keyboard for TV Remote Control -->
+                <div id="virtual-keyboard" class="keyboard-container">
+                    <div class="keyboard-row">
+                        <button class="key-btn focusable" data-char="A" tabindex="0">A</button>
+                        <button class="key-btn focusable" data-char="B" tabindex="0">B</button>
+                        <button class="key-btn focusable" data-char="C" tabindex="0">C</button>
+                        <button class="key-btn focusable" data-char="D" tabindex="0">D</button>
+                        <button class="key-btn focusable" data-char="E" tabindex="0">E</button>
+                        <button class="key-btn focusable" data-char="F" tabindex="0">F</button>
+                        <button class="key-btn focusable" data-char="G" tabindex="0">G</button>
+                        <button class="key-btn focusable" data-char="H" tabindex="0">H</button>
+                        <button class="key-btn focusable" data-char="I" tabindex="0">I</button>
+                        <button class="key-btn focusable" data-char="J" tabindex="0">J</button>
+                        <button class="key-btn focusable" data-char="1" tabindex="0">1</button>
+                        <button class="key-btn focusable" data-char="2" tabindex="0">2</button>
+                        <button class="key-btn focusable" data-char="3" tabindex="0">3</button>
+                    </div>
+                    <div class="keyboard-row">
+                        <button class="key-btn focusable" data-char="K" tabindex="0">K</button>
+                        <button class="key-btn focusable" data-char="L" tabindex="0">L</button>
+                        <button class="key-btn focusable" data-char="M" tabindex="0">M</button>
+                        <button class="key-btn focusable" data-char="N" tabindex="0">N</button>
+                        <button class="key-btn focusable" data-char="O" tabindex="0">O</button>
+                        <button class="key-btn focusable" data-char="P" tabindex="0">P</button>
+                        <button class="key-btn focusable" data-char="Q" tabindex="0">Q</button>
+                        <button class="key-btn focusable" data-char="R" tabindex="0">R</button>
+                        <button class="key-btn focusable" data-char="S" tabindex="0">S</button>
+                        <button class="key-btn focusable" data-char="T" tabindex="0">T</button>
+                        <button class="key-btn focusable" data-char="4" tabindex="0">4</button>
+                        <button class="key-btn focusable" data-char="5" tabindex="0">5</button>
+                        <button class="key-btn focusable" data-char="6" tabindex="0">6</button>
+                    </div>
+                    <div class="keyboard-row">
+                        <button class="key-btn focusable" data-char="U" tabindex="0">U</button>
+                        <button class="key-btn focusable" data-char="V" tabindex="0">V</button>
+                        <button class="key-btn focusable" data-char="W" tabindex="0">W</button>
+                        <button class="key-btn focusable" data-char="X" tabindex="0">X</button>
+                        <button class="key-btn focusable" data-char="Y" tabindex="0">Y</button>
+                        <button class="key-btn focusable" data-char="Z" tabindex="0">Z</button>
+                        <button class="key-btn focusable" data-char="-" tabindex="0">-</button>
+                        <button class="key-btn focusable" data-char="." tabindex="0">.</button>
+                        <button class="key-btn focusable" data-char="7" tabindex="0">7</button>
+                        <button class="key-btn focusable" data-char="8" tabindex="0">8</button>
+                        <button class="key-btn focusable" data-char="9" tabindex="0">9</button>
+                        <button class="key-btn focusable" data-char="0" tabindex="0">0</button>
+                    </div>
+                    <div class="keyboard-row">
+                        <button class="key-btn wide focusable" data-action="backspace" tabindex="0">⌫ Apagar</button>
+                        <button class="key-btn space focusable" data-char=" " tabindex="0">Espaço</button>
+                        <button class="key-btn wide focusable" data-action="search" tabindex="0">Buscar 🔍</button>
+                    </div>
+                </div>
+
+                <div id="search-results-grid" class="video-grid">
+                    <p style="color: #8c8ca0; font-size: 20px; margin-top: 20px;">Use o teclado acima para pesquisar vídeos.</p>
+                </div>
+            </div>
+
+            <!-- View: Account / Login -->
+            <div id="view-account" class="view-section">
+                <div class="section-header">
+                    <h2 class="section-title">👤 Minha Conta Cinefy</h2>
+                </div>
+
+                <!-- Logged In Card -->
+                <div id="account-logged-in-card" class="account-box" style="display: none;">
+                    <div class="user-profile-card">
+                        <div class="user-avatar" id="account-avatar-char">C</div>
+                        <div>
+                            <h2 id="account-name" style="font-size: 28px; margin-bottom: 4px;">Usuário</h2>
+                            <p id="account-email" style="color: #ffd700; font-size: 18px;"></p>
+                            <p id="account-scope" style="color: #9999aa; font-size: 15px; margin-top: 4px;"></p>
+                        </div>
+                    </div>
+                    <p style="color: #2ecc71; font-size: 18px; font-weight: 600; margin-bottom: 20px;">
+                        ✓ Sessão ativa e autenticada com sucesso no Cinefy.
+                    </p>
+                    <button id="account-logout-btn" class="btn-danger focusable" tabindex="0">Sair da Conta</button>
+                </div>
+
+                <!-- Login Form -->
+                <div id="account-login-card" class="account-box">
+                    <h3 style="font-size: 24px; margin-bottom: 20px;">Acessar sua Conta Cinefy</h3>
+                    <p style="color: #a0a0b5; margin-bottom: 25px; line-height: 1.5;">
+                        Faça login com seu e-mail e senha do Cinefy para acessar seus canais inscritos e conteúdos exclusivos. Suas credenciais são enviadas diretamente para a API oficial do Cinefy e a sessão é preservada com segurança na sua TV.
+                    </p>
+
+                    <div class="form-group">
+                        <label for="login-email">E-mail</label>
+                        <input type="email" id="login-email" class="form-input focusable" placeholder="seu-email@exemplo.com" tabindex="0">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="login-password">Senha</label>
+                        <input type="password" id="login-password" class="form-input focusable" placeholder="Digite sua senha" tabindex="0">
+                    </div>
+
+                    <button id="login-submit-btn" class="btn-primary focusable" tabindex="0">Entrar no Cinefy</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Fullscreen Video Player -->
+        <div id="player-container">
+            <video id="main-video" playsinline preload="auto"></video>
+            
+            <div id="player-osd" class="player-osd">
+                <div class="player-header">
+                    <div class="player-title-wrap">
+                        <h1 id="player-video-title">Título do Vídeo</h1>
+                        <p id="player-video-author">Canal</p>
+                    </div>
+                    <button id="player-close-btn" class="player-btn focusable" tabindex="0">✕ Fechar</button>
+                </div>
+
+                <div class="player-controls">
+                    <div class="progress-bar-wrap">
+                        <div class="progress-track">
+                            <div id="player-progress-fill" class="progress-fill"></div>
+                        </div>
+                        <div class="time-row">
+                            <span id="player-current-time">00:00</span>
+                            <span id="player-duration">00:00</span>
+                        </div>
+                    </div>
+
+                    <div class="control-buttons-row">
+                        <button id="player-rewind-btn" class="player-btn focusable" tabindex="0">⏪ -10s</button>
+                        <button id="player-play-btn" class="player-btn play-pause-btn focusable" tabindex="0">❚❚</button>
+                        <button id="player-forward-btn" class="player-btn focusable" tabindex="0">⏩ +10s</button>
+                        <button id="player-quality-btn" class="player-btn focusable" tabindex="0">⚙ Qualidade</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quality Selection Overlay -->
+            <div id="quality-modal">
+                <div id="quality-options-list">
+                    <!-- populated dynamically -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Dialog / Modal Layer -->
+        <div id="modal-overlay">
+            <div class="modal-card">
+                <h3 id="modal-title" class="modal-title">Aviso</h3>
+                <p id="modal-message" class="modal-message">Mensagem do sistema</p>
+                <div class="modal-actions" id="modal-actions">
+                    <button id="modal-primary-btn" class="btn-primary focusable" tabindex="0">OK</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notifications -->
+        <div id="toast-container" class="toast-container"></div>
+    </div>
+
+    <!-- Application Script (ES5) -->
+    <script src="app.js"></script>
+</body>
+</html>
