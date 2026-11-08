@@ -369,6 +369,25 @@ assert(capturedMeOptions && capturedMeOptions._skipAuthClear === true, 'Api.getM
 
 Api.request = originalApiRequest;
 
+// Teste 1.7: Construção exata de URLs de thumbnail de vídeo (sem 404)
+const sampleThumbUrl = Api.buildThumbnailUrl('u83a9On7DkaQw', '097c1643-32db-4c5b-b29c-e7fd67522036.png', 600);
+assert(sampleThumbUrl === 'https://cdn.cinefy.gg/videos/u83a9On7DkaQw/thumbnail/097c1643-32db-4c5b-b29c-e7fd67522036.png?width=600',
+    'Api.buildThumbnailUrl() constrói caminho oficial Cinefy (/videos/:id/thumbnail/:file) para evitar erro 404');
+
+// Teste 1.8: UI.exitApp executa encerramento multi-tier sem quebrar
+let exitInvoked = false;
+windowMock.tizen = {
+    application: {
+        getCurrentApplication: function() {
+            return {
+                exit: function() { exitInvoked = true; }
+            };
+        }
+    }
+};
+UI.exitApp();
+assert(exitInvoked === true, 'UI.exitApp() aciona encerramento limpo via API de aplicação Tizen');
+
 
 // ========================================================
 // BLOCO 2: PLAYER REAL, QUALIDADE EFETIVA & SEM BOTÕES FICTÍCIOS

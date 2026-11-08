@@ -10,7 +10,7 @@
     // 1. CONFIGURAÇÕES & CONSTANTES
     // ==========================================
     var CONFIG = {
-        VERSION: '1.1.3',
+        VERSION: '1.2.0',
         API_URL: 'https://api.cinefy.gg',
         PUBLIC_CDN: 'https://cdn.cinefy.gg',
         VIDEOS_CDN: 'https://videos.cinefy.gg',
@@ -270,6 +270,19 @@
                 url += '?width=' + width;
             }
             return url;
+        },
+
+        buildThumbnailUrl: function(videoId, thumbnail, width) {
+            if (!thumbnail) return 'assets/logo.png';
+            if (thumbnail.indexOf('http://') === 0 || thumbnail.indexOf('https://') === 0) {
+                return thumbnail;
+            }
+            if (!videoId) return 'assets/logo.png';
+            var url = CONFIG.PUBLIC_CDN + '/videos/' + encodeURIComponent(videoId) + '/thumbnail/' + encodeURIComponent(thumbnail);
+            if (width) {
+                url += '?width=' + width;
+            }
+            return url;
         }
     };
 
@@ -416,7 +429,74 @@
                 return;
             }
 
-            // Coletar todos os elementos visíveis e focáveis
+            // 1. Navegação direta dentro da barra lateral (#sidebar)
+            if (current.classList.contains('nav-item')) {
+                if (direction === 'up') {
+                    var prevNav = current.previousElementSibling;
+                    while (prevNav && (!prevNav.classList || !prevNav.classList.contains('nav-item'))) {
+                        prevNav = prevNav.previousElementSibling;
+                    }
+                    if (prevNav) this.focus(prevNav);
+                    return;
+                }
+                if (direction === 'down') {
+                    var nextNav = current.nextElementSibling;
+                    while (nextNav && (!nextNav.classList || !nextNav.classList.contains('nav-item'))) {
+                        nextNav = nextNav.nextElementSibling;
+                    }
+                    if (nextNav) this.focus(nextNav);
+                    return;
+                }
+                if (direction === 'right') {
+                    // Pular para o primeiro elemento focável da tela ativa
+                    var activeView = document.querySelector('.view-section.active');
+                    if (activeView) {
+                        var firstContent = activeView.querySelector('.focusable:not([disabled])');
+                        if (firstContent) {
+                            this.focus(firstContent);
+                            return;
+                        }
+                    }
+                }
+                if (direction === 'left') {
+                    // Limite esquerdo da interface atingido, permanece no menu
+                    return;
+                }
+            }
+
+            // 2. Navegação em carrossel horizontal (.horizontal-carousel)
+            var carousel = current.parentElement;
+            if (carousel && carousel.classList && carousel.classList.contains('horizontal-carousel')) {
+                if (direction === 'right') {
+                    var nextCard = current.nextElementSibling;
+                    while (nextCard && (!nextCard.classList || !nextCard.classList.contains('focusable'))) {
+                        nextCard = nextCard.nextElementSibling;
+                    }
+                    if (nextCard) {
+                        this.focus(nextCard);
+                        return;
+                    }
+                }
+                if (direction === 'left') {
+                    var prevCard = current.previousElementSibling;
+                    while (prevCard && (!prevCard.classList || !prevCard.classList.contains('focusable'))) {
+                        prevCard = prevCard.previousElementSibling;
+                    }
+                    if (prevCard) {
+                        this.focus(prevCard);
+                        return;
+                    } else {
+                        // Se estiver no primeiro cartão do carrossel, voltar para a barra lateral
+                        var activeNav = document.querySelector('.nav-item.active') || document.getElementById('nav-home');
+                        if (activeNav) {
+                            this.focus(activeNav);
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // 3. Fallback espacial para grades, listas e diálogos
             var elements = Array.prototype.slice.call(document.querySelectorAll('.focusable:not([disabled])'));
             var visibleElements = [];
             for (var i = 0; i < elements.length; i++) {
@@ -429,6 +509,12 @@
             var next = this.findBestCandidate(current, visibleElements, direction);
             if (next) {
                 this.focus(next);
+            } else if (direction === 'left' && !current.classList.contains('nav-item')) {
+                // Se navegar para esquerda e não houver mais itens na tela, pular para o menu lateral
+                var sideNav = document.querySelector('.nav-item.active') || document.getElementById('nav-home');
+                if (sideNav) {
+                    this.focus(sideNav);
+                }
             }
         },
 
@@ -553,15 +639,7 @@
                 'Sair do Cinefy',
                 'Deseja realmente sair do Cinefy e retornar à TV?',
                 function() {
-                    if (window.tizen && window.tizen.application) {
-                        try {
-                            window.tizen.application.getCurrentApplication().exit();
-                        } catch (e) {
-                            window.close();
-                        }
-                    } else {
-                        window.close();
-                    }
+                    UI.exitApp();
                 }
             );
         }
@@ -1372,20 +1450,26 @@
                     card.className = 'video-card focusable';
                     card.setAttribute('tabindex', '0');
 
-                    var thumbUrl = Api.buildMediaUrl('videos', video.thumbnail, 600);
+                    var thumbUrl = Api.buildThumbnailUrl(video.id, video.thumbnail, 600);
                     var durationStr = Player.formatTime((video.stream && video.stream.duration) ? video.stream.duration : 0);
-                    var authorName = (video.author && video.author.displayName) ? video.author.displayName : '';
+                    var authorName = (video.author && video.author.displayName) ? video.author.displayName : (video.author && video.author.username ? video.author.username : 'Cinefy');
+                    var authorAvatar = (video.author && video.author.avatar) ? Api.buildMediaUrl('avatars', video.author.avatar, 100) : 'assets/logo.png';
                     var badgeType = (video.type === 'free') ? '<span class="video-type-badge">Grátis</span>' : '<span class="video-type-badge vod">VOD</span>';
 
                     card.innerHTML = 
                         '<div class="video-thumb-wrap">' +
-                            '<img src="' + (thumbUrl || 'assets/logo.png') + '" alt="" class="video-thumb" onerror="this.src=\'assets/logo.png\'">' +
+                            '<img src="' + thumbUrl + '" alt="" class="video-thumb" onerror="this.src=\'assets/logo.png\'">' +
                             '<span class="video-duration">' + durationStr + '</span>' +
                             badgeType +
                         '</div>' +
                         '<div class="video-info">' +
-                            '<div class="video-title">' + (video.title || 'Vídeo') + '</div>' +
-                            '<div class="video-author">👤 ' + authorName + '</div>' +
+                            '<div class="video-author-row">' +
+                                '<img src="' + authorAvatar + '" alt="" class="video-author-avatar" onerror="this.src=\'assets/logo.png\'">' +
+                                '<div class="video-text-col">' +
+                                    '<div class="video-title">' + (video.title || 'Vídeo') + '</div>' +
+                                    '<div class="video-author-name">👤 ' + authorName + '</div>' +
+                                '</div>' +
+                            '</div>' +
                         '</div>';
 
                     card.addEventListener('click', function() {
@@ -1689,6 +1773,62 @@
                     toast.parentNode.removeChild(toast);
                 }
             }, 3500);
+        },
+
+        exitApp: function() {
+            console.log('Executando encerramento do Cinefy...');
+            // 1. TizenBrew API
+            try {
+                var tb = window.tizenbrew || (window.top && window.top.tizenbrew) || (window.parent && window.parent.tizenbrew);
+                if (tb) {
+                    if (typeof tb.exit === 'function') { tb.exit(); return; }
+                    if (typeof tb.close === 'function') { tb.close(); return; }
+                    if (typeof tb.quit === 'function') { tb.quit(); return; }
+                }
+            } catch (e1) {}
+
+            // 2. Native Tizen Application API (self, top, parent)
+            try {
+                var tizenObj = window.tizen || (window.top && window.top.tizen) || (window.parent && window.parent.tizen);
+                if (tizenObj && tizenObj.application) {
+                    var curApp = tizenObj.application.getCurrentApplication();
+                    if (curApp && typeof curApp.exit === 'function') {
+                        curApp.exit();
+                        return;
+                    }
+                }
+            } catch (e2) {}
+
+            // 3. Tizen application hide / suspend
+            try {
+                var tizenObj2 = window.tizen || (window.top && window.top.tizen) || (window.parent && window.parent.tizen);
+                if (tizenObj2 && tizenObj2.application) {
+                    var curApp2 = tizenObj2.application.getCurrentApplication();
+                    if (curApp2 && typeof curApp2.hide === 'function') {
+                        curApp2.hide();
+                        return;
+                    }
+                }
+            } catch (e3) {}
+
+            // 4. Retorno ao launcher TizenBrew pelo histórico web
+            try {
+                if (window.history && window.history.length > 1) {
+                    window.history.back();
+                    return;
+                }
+            } catch (e4) {}
+
+            // 5. Fechamento padrão de janela
+            try {
+                window.close();
+            } catch (e5) {}
+
+            try {
+                if (window.top && window.top !== window) {
+                    window.top.close();
+                }
+            } catch (e6) {}
         }
     };
 
