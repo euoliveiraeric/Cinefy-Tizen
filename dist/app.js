@@ -10,7 +10,7 @@
     // 1. CONFIGURAÇÕES & CONSTANTES
     // ==========================================
     var CONFIG = {
-        VERSION: '1.1.0',
+        VERSION: '1.1.1',
         API_URL: 'https://api.cinefy.gg',
         PUBLIC_CDN: 'https://cdn.cinefy.gg',
         VIDEOS_CDN: 'https://videos.cinefy.gg',
@@ -1715,13 +1715,19 @@
     // ==========================================
     // 9. INICIALIZAÇÃO GERAL DO APLICATIVO
     // ==========================================
-    window.addEventListener('DOMContentLoaded', function() {
+    function bootstrap() {
         Nav.init();
         Player.init();
         Keyboard.init();
         UI.init();
         Lifecycle.init();
-    });
+    }
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        setTimeout(bootstrap, 0);
+    } else {
+        window.addEventListener('DOMContentLoaded', bootstrap);
+    }
 
     // ==========================================
     // 10. EXPOSIÇÃO DE MÓDULOS (Compatibilidade e Testes)
