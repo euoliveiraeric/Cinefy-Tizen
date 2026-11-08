@@ -421,12 +421,53 @@ body, html {
     margin-bottom: 4px;
 }
 
+.video-meta-row {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    font-size: 13px;
+    color: #9c9cb4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .video-author-name {
     font-size: 13px;
     color: #9c9cb4;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    max-width: 170px;
+}
+
+.video-dot {
+    margin: 0 6px;
+    color: #6a6a80;
+    font-size: 10px;
+}
+
+.video-date {
+    font-size: 13px;
+    color: #ffd700;
+    font-weight: 600;
+}
+
+.video-progress-track {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 6px;
+    background-color: rgba(0, 0, 0, 0.7);
+    z-index: 10;
+}
+
+.video-progress-bar {
+    height: 100%;
+    background-color: #ffd700;
+    width: 0%;
 }
 
 .video-author {
@@ -779,7 +820,18 @@ body, html {
 
 .progress-bar-wrap {
     width: 100%;
-    margin-bottom: 20px;
+    margin-bottom: 16px;
+    padding: 8px 0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.progress-bar-wrap.focused,
+.progress-bar-wrap:focus {
+    outline: none !important;
+    box-shadow: none !important;
+    transform: scale(1.01);
 }
 
 .progress-track {
@@ -788,14 +840,44 @@ body, html {
     background-color: rgba(255, 255, 255, 0.25);
     border-radius: 4px;
     position: relative;
-    overflow: hidden;
+    overflow: visible;
+    transition: height 0.2s ease, background-color 0.2s ease;
+}
+
+.progress-bar-wrap.focused .progress-track,
+.progress-bar-wrap:focus .progress-track {
+    height: 14px;
+    background-color: rgba(255, 255, 255, 0.4);
+    box-shadow: 0 0 16px rgba(255, 215, 0, 0.5);
 }
 
 .progress-fill {
     height: 100%;
     background-color: #ffd700;
     width: 0%;
-    transition: width 0.1s linear;
+    border-radius: 4px;
+    transition: width 0.08s linear;
+}
+
+.scrub-handle {
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 0%;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background-color: #ffd700;
+    border: 3px solid #000000;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 20;
+}
+
+.progress-bar-wrap.focused .scrub-handle,
+.progress-bar-wrap:focus .scrub-handle {
+    display: block;
 }
 
 .time-row {
@@ -803,10 +885,24 @@ body, html {
     display: flex;
     -webkit-justify-content: space-between;
     justify-content: space-between;
+    -webkit-align-items: center;
+    align-items: center;
     font-size: 16px;
     color: #cccccc;
     font-weight: 600;
     margin-top: 8px;
+    position: relative;
+}
+
+.scrub-badge {
+    background-color: #ffd700;
+    color: #000000;
+    font-weight: 800;
+    font-size: 16px;
+    padding: 4px 14px;
+    border-radius: 20px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+    letter-spacing: 0.5px;
 }
 
 .control-buttons-row {

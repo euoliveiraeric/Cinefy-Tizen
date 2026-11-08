@@ -10,7 +10,7 @@
     // 1. CONFIGURAÇÕES & CONSTANTES
     // ==========================================
     var CONFIG = {
-        VERSION: '1.2.0',
+        VERSION: '1.3.0',
         API_URL: 'https://api.cinefy.gg',
         PUBLIC_CDN: 'https://cdn.cinefy.gg',
         VIDEOS_CDN: 'https://videos.cinefy.gg',
@@ -87,6 +87,55 @@
             } else {
                 this.setItem('user', JSON.stringify(user));
             }
+        },
+        getWatchProgress: function(videoId) {
+            if (!videoId) return null;
+            try {
+                var raw = this.getItem('watch_history');
+                if (!raw) return null;
+                var hist = JSON.parse(raw);
+                return hist[videoId] || null;
+            } catch (e) {
+                return null;
+            }
+        },
+        saveWatchProgress: function(videoId, watchTime, duration) {
+            if (!videoId || isNaN(watchTime) || watchTime < 0) return;
+            try {
+                var raw = this.getItem('watch_history');
+                var hist = raw ? JSON.parse(raw) : {};
+                hist[videoId] = {
+                    watchTime: Math.floor(watchTime),
+                    duration: Math.floor(duration || 0),
+                    updatedAt: Date.now()
+                };
+                // Limitar histórico aos 100 itens mais recentes para preservar quota do Tizen
+                var keys = [];
+                for (var k in hist) {
+                    if (hist.hasOwnProperty(k)) keys.push(k);
+                }
+                if (keys.length > 100) {
+                    keys.sort(function(a, b) {
+                        return (hist[a].updatedAt || 0) - (hist[b].updatedAt || 0);
+                    });
+                    for (var i = 0; i < keys.length - 100; i++) {
+                        delete hist[keys[i]];
+                    }
+                }
+                this.setItem('watch_history', JSON.stringify(hist));
+            } catch (e) {
+                console.log('Aviso: Erro ao registrar progresso no storage:', e);
+            }
+        },
+        clearWatchProgress: function(videoId) {
+            if (!videoId) return;
+            try {
+                var raw = this.getItem('watch_history');
+                if (!raw) return;
+                var hist = JSON.parse(raw);
+                delete hist[videoId];
+                this.setItem('watch_history', JSON.stringify(hist));
+            } catch (e) {}
         },
         clearAuth: function() {
             // NUNCA chamar localStorage.clear()! Apenas as chaves exclusivas do Cinefy
@@ -283,6 +332,20 @@
                 url += '?width=' + width;
             }
             return url;
+        },
+
+        updateWatchTime: function(videoId, watchTime) {
+            if (!videoId || isNaN(watchTime) || watchTime < 0) return Promise.resolve(null);
+            var token = Storage.getToken();
+            if (!token) return Promise.resolve(null);
+            return this.request('/v1/video/' + encodeURIComponent(videoId) + '/watch-time', {
+                method: 'PUT',
+                body: { watchTime: Math.max(0, Math.floor(watchTime)) },
+                _skipAuthClear: true
+            }).catch(function(err) {
+                // Silencioso: falhas de envio analítico não devem interromper o player
+                return null;
+            });
         }
     };
 
@@ -654,9 +717,17 @@
         osdEl: null,
         osdTimer: null,
         currentVideo: null,
+        triggerElement: null,
+        pendingResumeTime: null,
         qualities: [],
         currentQuality: null,
         effectiveResolution: null,
+        _lastLocalSaveTime: 0,
+        _lastSyncTime: 0,
+        _scrubTargetTime: null,
+        _scrubTimer: null,
+        _scrubHoldCount: 0,
+        _lastScrubKeyTime: 0,
 
         init: function() {
             var self = this;
@@ -667,11 +738,17 @@
 
             this.videoEl.addEventListener('loadedmetadata', function() {
                 self.updateEffectiveResolution();
+                self.applyPendingResume();
+            });
+
+            this.videoEl.addEventListener('canplay', function() {
+                self.applyPendingResume();
             });
 
             this.videoEl.addEventListener('timeupdate', function() {
                 self.updateProgress();
                 self.updateEffectiveResolution();
+                self.handlePeriodicProgressSave();
             });
 
             this.videoEl.addEventListener('play', function() {
@@ -682,9 +759,13 @@
             this.videoEl.addEventListener('pause', function() {
                 var playBtn = document.getElementById('player-play-btn');
                 if (playBtn) playBtn.innerHTML = '▶';
+                self.saveCurrentProgress();
             });
 
             this.videoEl.addEventListener('ended', function() {
+                if (self.currentVideo) {
+                    Storage.clearWatchProgress(self.currentVideo.id);
+                }
                 self.close();
             });
 
@@ -703,21 +784,81 @@
             });
 
             document.getElementById('player-rewind-btn').addEventListener('click', function() {
-                self.seek(-10);
+                self.handleScrub(-1);
             });
 
             document.getElementById('player-forward-btn').addEventListener('click', function() {
-                self.seek(10);
+                self.handleScrub(1);
             });
 
             document.getElementById('player-quality-btn').addEventListener('click', function() {
                 self.toggleQualityModal();
             });
+
+            var progressBar = document.getElementById('player-progress-bar');
+            if (progressBar) {
+                progressBar.addEventListener('click', function() {
+                    self.togglePlayPause();
+                });
+            }
         },
 
-        open: function(videoData) {
+        applyPendingResume: function() {
+            if (this.pendingResumeTime !== null && this.pendingResumeTime > 5 && this.videoEl) {
+                var t = this.pendingResumeTime;
+                this.pendingResumeTime = null;
+                try {
+                    this.videoEl.currentTime = t;
+                    UI.showToast('Continuando de onde parou (' + this.formatTime(t) + ')');
+                } catch (e) {
+                    console.log('Falha ao restaurar tempo inicial:', e);
+                }
+            }
+        },
+
+        handlePeriodicProgressSave: function() {
+            if (!this.videoEl || !this.currentVideo) return;
+            var cur = this.videoEl.currentTime || 0;
+            var dur = this.videoEl.duration || 0;
+            if (cur <= 2 || dur <= 0) return;
+
+            var now = Date.now ? Date.now() : new Date().getTime();
+            if (now - this._lastLocalSaveTime > 4000) {
+                this._lastLocalSaveTime = now;
+                Storage.saveWatchProgress(this.currentVideo.id, cur, dur);
+            }
+            if (now - this._lastSyncTime > 20000) {
+                this._lastSyncTime = now;
+                Api.updateWatchTime(this.currentVideo.id, cur);
+            }
+        },
+
+        saveCurrentProgress: function() {
+            if (!this.videoEl || !this.currentVideo) return;
+            var cur = this.videoEl.currentTime || 0;
+            var dur = this.videoEl.duration || 0;
+            if (cur > 2 && dur > 0) {
+                Storage.saveWatchProgress(this.currentVideo.id, cur, dur);
+                Api.updateWatchTime(this.currentVideo.id, cur);
+            }
+        },
+
+        open: function(videoData, triggerCard) {
             var self = this;
             this.currentVideo = videoData;
+            this.triggerElement = triggerCard || Nav.currentFocus;
+
+            // Verificar tempo salvo no storage local da TV ou informado na obra
+            var saved = Storage.getWatchProgress(videoData.id);
+            var savedTime = (saved && saved.watchTime) ? saved.watchTime : (videoData.watchTime || 0);
+            var duration = (videoData.stream && videoData.stream.duration) ? videoData.stream.duration : (saved ? saved.duration : 0);
+
+            if (savedTime >= 5 && (!duration || savedTime < (duration - 15))) {
+                this.pendingResumeTime = savedTime;
+            } else {
+                this.pendingResumeTime = null;
+            }
+
             UI.showToast('Carregando vídeo: ' + (videoData.title || 'Vídeo'));
 
             // Buscar dados completos de vídeo e autorização de playback
@@ -731,6 +872,11 @@
                                 merged[key] = fullData[key];
                             }
                         }
+                    }
+
+                    // Se a API retornou watchTime mais recente
+                    if (merged.watchTime && merged.watchTime > 5 && !self.pendingResumeTime) {
+                        self.pendingResumeTime = merged.watchTime;
                     }
 
                     if (merged.playback && merged.playback.authorization) {
@@ -780,6 +926,10 @@
             container.classList.add('active');
             this.isActive = true;
             this.currentVideo = videoData;
+            this._scrubTargetTime = null;
+            this._scrubHoldCount = 0;
+            this._lastLocalSaveTime = 0;
+            this._lastSyncTime = 0;
 
             document.getElementById('player-video-title').textContent = videoData.title || 'Vídeo';
             document.getElementById('player-video-author').textContent = (videoData.author && videoData.author.displayName) ? videoData.author.displayName : '';
@@ -835,7 +985,12 @@
             }
 
             this.showOsd();
-            Nav.focus(document.getElementById('player-play-btn'));
+            var progressBar = document.getElementById('player-progress-bar');
+            if (progressBar) {
+                Nav.focus(progressBar);
+            } else {
+                Nav.focus(document.getElementById('player-play-btn'));
+            }
         },
 
         handlePlaybackError: function() {
@@ -882,6 +1037,7 @@
         },
 
         close: function() {
+            this.saveCurrentProgress();
             if (this.videoEl) {
                 this.videoEl.pause();
                 this.videoEl.removeAttribute('src');
@@ -894,12 +1050,27 @@
             // Fechar modal de qualidade se aberto
             document.getElementById('quality-modal').classList.remove('active');
 
-            // Retornar foco para a tela anterior
-            var activeSection = document.querySelector('.view-section.active');
-            if (activeSection) {
-                var firstFocusable = activeSection.querySelector('.focusable');
-                if (firstFocusable) Nav.focus(firstFocusable);
+            // Limpar estado de scrub
+            this.hideScrubIndicator();
+            this._scrubTargetTime = null;
+            clearTimeout(this._scrubTimer);
+
+            // Retornar foco com precisão para o card / elemento que abriu o player!
+            var target = this.triggerElement;
+            this.triggerElement = null;
+
+            if (target && document.contains(target) && !Nav.isInHiddenContainer(target)) {
+                Nav.focus(target);
+            } else {
+                var activeSection = document.querySelector('.view-section.active');
+                if (activeSection) {
+                    var firstFocusable = activeSection.querySelector('.focusable');
+                    if (firstFocusable) Nav.focus(firstFocusable);
+                }
             }
+
+            // Atualizar barras de progresso nos cards da tela
+            UI.updateWatchedBadges();
         },
 
         togglePlayPause: function() {
@@ -913,25 +1084,114 @@
         },
 
         seek: function(seconds) {
-            if (!this.videoEl) return;
-            var newTime = this.videoEl.currentTime + seconds;
-            if (newTime < 0) newTime = 0;
-            if (newTime > this.videoEl.duration) newTime = this.videoEl.duration;
-            this.videoEl.currentTime = newTime;
-            this.updateProgress();
-            this.showOsd();
+            this.handleScrub(seconds > 0 ? 1 : -1);
         },
 
         updateProgress: function() {
             if (!this.videoEl) return;
+            // Se o usuário estiver no meio de um scrub manual, não sobrescrever com o tempo do vídeo
+            if (this._scrubTargetTime !== null) return;
+
             var current = this.videoEl.currentTime || 0;
             var duration = this.videoEl.duration || 0;
+            this.renderProgressValues(current, duration);
+        },
 
-            document.getElementById('player-current-time').textContent = this.formatTime(current);
-            document.getElementById('player-duration').textContent = this.formatTime(duration);
+        renderProgressValues: function(current, duration) {
+            var curEl = document.getElementById('player-current-time');
+            var durEl = document.getElementById('player-duration');
+            var fillEl = document.getElementById('player-progress-fill');
+            var handleEl = document.getElementById('player-scrub-handle');
+
+            if (curEl) curEl.textContent = this.formatTime(current);
+            if (durEl) durEl.textContent = this.formatTime(duration);
 
             var percent = duration > 0 ? (current / duration) * 100 : 0;
-            document.getElementById('player-progress-fill').style.width = percent + '%';
+            if (percent < 0) percent = 0;
+            if (percent > 100) percent = 100;
+
+            if (fillEl) fillEl.style.width = percent + '%';
+            if (handleEl) handleEl.style.left = percent + '%';
+        },
+
+        handleScrub: function(direction) {
+            if (!this.videoEl) return;
+            var duration = this.videoEl.duration || 0;
+            if (duration <= 0) return;
+
+            var now = Date.now ? Date.now() : new Date().getTime();
+            if (now - this._lastScrubKeyTime < 450) {
+                this._scrubHoldCount++;
+            } else {
+                this._scrubHoldCount = 0;
+            }
+            this._lastScrubKeyTime = now;
+
+            // Aceleração progressiva por repetição contínua (segurando a seta no controle):
+            // 0-3 pulsos: 10s por pulso
+            // 4-8 pulsos: 30s por pulso
+            // 9-14 pulsos: 60s (1 minuto) por pulso
+            // 15+ pulsos: 120s (2 minutos) por pulso
+            var step = 10;
+            if (this._scrubHoldCount > 14) {
+                step = 120;
+            } else if (this._scrubHoldCount > 8) {
+                step = 60;
+            } else if (this._scrubHoldCount > 3) {
+                step = 30;
+            }
+
+            if (this._scrubTargetTime === null) {
+                this._scrubTargetTime = this.videoEl.currentTime || 0;
+            }
+
+            this._scrubTargetTime += (direction * step);
+            if (this._scrubTargetTime < 0) this._scrubTargetTime = 0;
+            if (this._scrubTargetTime > duration) this._scrubTargetTime = duration;
+
+            // Atualização visual fluida imediata
+            this.renderProgressValues(this._scrubTargetTime, duration);
+            this.showScrubIndicator(direction, step, this._scrubTargetTime, duration);
+            this.showOsd();
+
+            // Garantir foco na barra de progresso durante o scrub
+            var progressBar = document.getElementById('player-progress-bar');
+            if (progressBar && Nav.currentFocus !== progressBar) {
+                Nav.focus(progressBar);
+            }
+
+            // Debounce do seek de hardware (evita travamentos na TV durante key repeats contínuos)
+            var self = this;
+            clearTimeout(this._scrubTimer);
+            this._scrubTimer = setTimeout(function() {
+                self.commitScrub();
+            }, 320);
+        },
+
+        commitScrub: function() {
+            if (!this.videoEl || this._scrubTargetTime === null) return;
+            var target = this._scrubTargetTime;
+            this._scrubTargetTime = null;
+            this._scrubHoldCount = 0;
+            try {
+                this.videoEl.currentTime = target;
+            } catch (e) {}
+            this.hideScrubIndicator();
+            this.saveCurrentProgress();
+        },
+
+        showScrubIndicator: function(direction, step, targetTime, duration) {
+            var badge = document.getElementById('player-scrub-badge');
+            if (!badge) return;
+            var sign = direction > 0 ? '+' : '-';
+            var stepStr = step >= 60 ? (Math.round(step / 60) + 'm') : (step + 's');
+            badge.textContent = (direction > 0 ? '⏩ ' : '⏪ ') + sign + stepStr + ' (' + this.formatTime(targetTime) + ' / ' + this.formatTime(duration) + ')';
+            badge.style.display = 'inline-block';
+        },
+
+        hideScrubIndicator: function() {
+            var badge = document.getElementById('player-scrub-badge');
+            if (badge) badge.style.display = 'none';
         },
 
         formatTime: function(seconds) {
@@ -1100,6 +1360,14 @@
             var keyCode = e.keyCode || e.which;
             this.showOsd();
 
+            var currentFocus = Nav.currentFocus;
+            var progressBar = document.getElementById('player-progress-bar');
+            var playBtn = document.getElementById('player-play-btn');
+            var rewindBtn = document.getElementById('player-rewind-btn');
+            var forwardBtn = document.getElementById('player-forward-btn');
+            var qualityBtn = document.getElementById('player-quality-btn');
+            var closeBtn = document.getElementById('player-close-btn');
+
             // Teclas de controle remoto Samsung
             switch (keyCode) {
                 case 415: // MediaPlay
@@ -1116,46 +1384,91 @@
                     break;
                 case 417: // MediaFastForward
                     e.preventDefault();
-                    this.seek(30);
+                    this.handleScrub(1);
                     break;
                 case 412: // MediaRewind
                     e.preventDefault();
-                    this.seek(-30);
+                    this.handleScrub(-1);
                     break;
                 case 413: // MediaStop
                 case 10009: // Back
                 case 27: // Escape
                     e.preventDefault();
                     var qModal = document.getElementById('quality-modal');
-                    if (qModal.classList.contains('active')) {
+                    if (qModal && qModal.classList.contains('active')) {
                         qModal.classList.remove('active');
-                        Nav.focus(document.getElementById('player-quality-btn'));
+                        Nav.focus(qualityBtn);
                     } else {
                         this.close();
                     }
                     break;
-                case 37: // Left
-                    if (!this.osdEl.classList.contains('hidden') && Nav.currentFocus) {
-                        Nav.moveFocus('left');
+                case 37: // Left (Rewind / Scrub ou navegação)
+                    e.preventDefault();
+                    if (currentFocus === progressBar) {
+                        this.handleScrub(-1);
+                    } else if (currentFocus === forwardBtn) {
+                        Nav.focus(playBtn);
+                    } else if (currentFocus === playBtn) {
+                        Nav.focus(rewindBtn);
+                    } else if (currentFocus === qualityBtn) {
+                        Nav.focus(forwardBtn);
+                    } else if (currentFocus === rewindBtn) {
+                        this.handleScrub(-1);
+                    } else if (currentFocus === closeBtn) {
+                        Nav.focus(progressBar);
                     } else {
-                        this.seek(-10);
+                        this.handleScrub(-1);
                     }
                     break;
-                case 39: // Right
-                    if (!this.osdEl.classList.contains('hidden') && Nav.currentFocus) {
-                        Nav.moveFocus('right');
+                case 39: // Right (Fast Forward / Scrub ou navegação)
+                    e.preventDefault();
+                    if (currentFocus === progressBar) {
+                        this.handleScrub(1);
+                    } else if (currentFocus === rewindBtn) {
+                        Nav.focus(playBtn);
+                    } else if (currentFocus === playBtn) {
+                        Nav.focus(forwardBtn);
+                    } else if (currentFocus === forwardBtn) {
+                        Nav.focus(qualityBtn);
+                    } else if (currentFocus === qualityBtn) {
+                        this.handleScrub(1);
+                    } else if (currentFocus === closeBtn) {
+                        Nav.focus(progressBar);
                     } else {
-                        this.seek(10);
+                        this.handleScrub(1);
                     }
                     break;
                 case 38: // Up
-                    Nav.moveFocus('up');
+                    e.preventDefault();
+                    if (currentFocus === playBtn || currentFocus === rewindBtn || currentFocus === forwardBtn || currentFocus === qualityBtn) {
+                        Nav.focus(progressBar);
+                    } else if (currentFocus === progressBar) {
+                        Nav.focus(closeBtn);
+                    } else {
+                        Nav.moveFocus('up');
+                    }
                     break;
                 case 40: // Down
-                    Nav.moveFocus('down');
+                    e.preventDefault();
+                    if (currentFocus === closeBtn) {
+                        Nav.focus(progressBar);
+                    } else if (currentFocus === progressBar) {
+                        Nav.focus(playBtn);
+                    } else {
+                        Nav.moveFocus('down');
+                    }
                     break;
                 case 13: // Enter
-                    if (Nav.currentFocus) Nav.currentFocus.click();
+                    e.preventDefault();
+                    if (currentFocus === progressBar) {
+                        if (this._scrubTargetTime !== null) {
+                            this.commitScrub();
+                        } else {
+                            this.togglePlayPause();
+                        }
+                    } else if (currentFocus) {
+                        currentFocus.click();
+                    }
                     break;
             }
         }
@@ -1435,6 +1748,76 @@
             }
         },
 
+        formatRelativeTime: function(dateStr) {
+            if (!dateStr) return '';
+            try {
+                var time = new Date(dateStr).getTime();
+                if (isNaN(time)) {
+                    var safeStr = String(dateStr).replace(/-/g, '/').replace('T', ' ').replace(/\..*$/, '');
+                    time = new Date(safeStr).getTime();
+                }
+                if (isNaN(time)) return '';
+
+                var now = Date.now ? Date.now() : new Date().getTime();
+                var diffSec = Math.floor((now - time) / 1000);
+                if (diffSec < 0) diffSec = 0;
+
+                if (diffSec < 60) return 'agora';
+                var diffMin = Math.floor(diffSec / 60);
+                if (diffMin === 1) return 'há 1 min';
+                if (diffMin < 60) return 'há ' + diffMin + ' min';
+
+                var diffHours = Math.floor(diffMin / 60);
+                if (diffHours === 1) return 'há 1 hora';
+                if (diffHours < 24) return 'há ' + diffHours + ' horas';
+
+                var diffDays = Math.floor(diffHours / 24);
+                if (diffDays === 1) return 'há 1 dia';
+                if (diffDays < 7) return 'há ' + diffDays + ' dias';
+
+                var diffWeeks = Math.floor(diffDays / 7);
+                if (diffWeeks === 1) return 'há 1 semana';
+                if (diffWeeks < 4) return 'há ' + diffWeeks + ' semanas';
+
+                var diffMonths = Math.floor(diffDays / 30);
+                if (diffMonths === 1) return 'há 1 mês';
+                if (diffMonths < 12) return 'há ' + diffMonths + ' meses';
+
+                var diffYears = Math.floor(diffDays / 365);
+                if (diffYears === 1) return 'há 1 ano';
+                return 'há ' + diffYears + ' anos';
+            } catch (e) {
+                return '';
+            }
+        },
+
+        updateWatchedBadges: function() {
+            var cards = document.querySelectorAll('.video-card[data-video-id]');
+            for (var i = 0; i < cards.length; i++) {
+                var c = cards[i];
+                var vid = c.getAttribute('data-video-id');
+                var p = Storage.getWatchProgress(vid);
+                var thumbWrap = c.querySelector('.video-thumb-wrap');
+                if (thumbWrap) {
+                    var existing = thumbWrap.querySelector('.video-progress-track');
+                    if (p && p.duration > 0 && p.watchTime > 5) {
+                        var pct = Math.min(Math.floor((p.watchTime / p.duration) * 100), 100);
+                        if (existing) {
+                            var bar = existing.querySelector('.video-progress-bar');
+                            if (bar) bar.style.width = pct + '%';
+                        } else {
+                            var track = document.createElement('div');
+                            track.className = 'video-progress-track';
+                            track.innerHTML = '<div class="video-progress-bar" style="width:' + pct + '%;"></div>';
+                            thumbWrap.appendChild(track);
+                        }
+                    } else if (existing) {
+                        existing.parentNode.removeChild(existing);
+                    }
+                }
+            }
+        },
+
         renderVideosGrid: function(videos, containerId) {
             var container = document.getElementById(containerId);
             container.innerHTML = '';
@@ -1444,36 +1827,65 @@
                 return;
             }
 
+            var self = this;
             for (var i = 0; i < videos.length; i++) {
                 (function(video) {
                     var card = document.createElement('div');
                     card.className = 'video-card focusable';
                     card.setAttribute('tabindex', '0');
+                    if (video.id) {
+                        card.setAttribute('data-video-id', video.id);
+                    }
 
                     var thumbUrl = Api.buildThumbnailUrl(video.id, video.thumbnail, 600);
-                    var durationStr = Player.formatTime((video.stream && video.stream.duration) ? video.stream.duration : 0);
+                    var durationSec = (video.stream && video.stream.duration) ? video.stream.duration : 0;
+                    var durationStr = Player.formatTime(durationSec);
                     var authorName = (video.author && video.author.displayName) ? video.author.displayName : (video.author && video.author.username ? video.author.username : 'Cinefy');
                     var authorAvatar = (video.author && video.author.avatar) ? Api.buildMediaUrl('avatars', video.author.avatar, 100) : 'assets/logo.png';
                     var badgeType = (video.type === 'free') ? '<span class="video-type-badge">Grátis</span>' : '<span class="video-type-badge vod">VOD</span>';
+
+                    // Data relativa de postagem ("há X dias", etc.)
+                    var publishDate = video.publishedAt || video.createdAt;
+                    var relativeTime = self.formatRelativeTime(publishDate);
+
+                    // Progresso assistido (local ou remoto)
+                    var watchInfo = Storage.getWatchProgress(video.id);
+                    var watchTime = (watchInfo && watchInfo.watchTime) ? watchInfo.watchTime : (video.watchTime || 0);
+                    var totalDuration = durationSec || (watchInfo ? watchInfo.duration : 0);
+                    var percent = 0;
+                    if (totalDuration > 0 && watchTime > 5) {
+                        percent = Math.min(Math.floor((watchTime / totalDuration) * 100), 100);
+                    }
+                    var progressHtml = (percent > 0)
+                        ? '<div class="video-progress-track"><div class="video-progress-bar" style="width:' + percent + '%;"></div></div>'
+                        : '';
+
+                    var dateSnippet = relativeTime
+                        ? '<span class="video-dot">•</span><span class="video-date">' + relativeTime + '</span>'
+                        : '';
 
                     card.innerHTML = 
                         '<div class="video-thumb-wrap">' +
                             '<img src="' + thumbUrl + '" alt="" class="video-thumb" onerror="this.src=\'assets/logo.png\'">' +
                             '<span class="video-duration">' + durationStr + '</span>' +
                             badgeType +
+                            progressHtml +
                         '</div>' +
                         '<div class="video-info">' +
                             '<div class="video-author-row">' +
                                 '<img src="' + authorAvatar + '" alt="" class="video-author-avatar" onerror="this.src=\'assets/logo.png\'">' +
                                 '<div class="video-text-col">' +
                                     '<div class="video-title">' + (video.title || 'Vídeo') + '</div>' +
-                                    '<div class="video-author-name">👤 ' + authorName + '</div>' +
+                                    '<div class="video-meta-row">' +
+                                        '<span class="video-author-name">👤 ' + authorName + '</span>' +
+                                        dateSnippet +
+                                    '</div>' +
                                 '</div>' +
                             '</div>' +
                         '</div>';
 
                     card.addEventListener('click', function() {
-                        Player.open(video);
+                        Player.open(video, card);
                     });
 
                     container.appendChild(card);

@@ -45,7 +45,7 @@ A versão web do `https://cinefy.gg` utiliza Next.js (App Router) compilado via 
 - Para evitar que o Chromium 47 retenha arquivos em cache local desatualizados após atualizações no TizenBrew:
   - Tags `<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">` e `<meta http-equiv="Pragma" content="no-cache">` foram incluídas no `dist/index.html`.
   - Os recursos estáticos utilizam versionamento por parâmetro de URL (`app.css?v=1.1.0` e `app.js?v=1.1.0`).
-  - O rodapé do aplicativo exibe visualmente a versão ativa (`Cinefy TV v1.1.0 (Tizen 3.0 Edition)`) para confirmação direta na tela da TV.
+  - O rodapé do aplicativo exibe visualmente a versão ativa (`Cinefy TV v1.3.0 (Tizen 3.0 Edition)`) para confirmação direta na tela da TV.
 
 ---
 
@@ -61,7 +61,11 @@ A versão web do `https://cinefy.gg` utiliza Next.js (App Router) compilado via 
 | :--- | :---: | :--- |
 | **Sintaxe JavaScript ES5 Estrita** | Implementado | Testado no Computador (100% aprovado via AST Acorn `ecmaVersion: 5`) |
 | **CSS compatível com Chromium 47** | Implementado | Testado no Computador (sem CSS Variables, sem flex gap) |
-| **Execução do Código Real nos Testes** | Implementado | Testado via `test_suite.js` (executa `dist/app.js` real sem duplicação de lógica) |
+| **Execução do Código Real nos Testes** | Implementado | Testado via `test_suite.js` (executa `dist/app.js` real - 51 testes aprovados) |
+| **Scrub na Linha do Tempo c/ Aceleração** | Implementado | Testado via D-Pad (10s -> 30s -> 60s -> 120s debounced) |
+| **Retomada de Reprodução (Watch Progress)** | Implementado | Testado no Storage local e sincronização com API Cinefy |
+| **Preservação de Foco no Retorno** | Implementado | Testado no Computador (foco mantido no card do episódio ao fechar player) |
+| **Data Relativa de Postagem ("há X dias")** | Implementado | Testado no Computador (cálculo de datas relativas para catálogo) |
 | **Navegação D-Pad (Setas, OK, Voltar)** | Implementado | Testado no Computador (simulação D-Pad e Browser MCP) |
 | **Preservação de Módulos (StremioK)** | Implementado | Testado no Computador (apenas chaves `cinefy_` manipuladas) |
 | **Tratamento de Quota / Exceções** | Implementado | Testado no Computador (captura graciosa de `QuotaExceededError` com fallback) |
@@ -113,4 +117,4 @@ Cinefy-Tizen/
 4. Digite: `srwayne15-bot/Cinefy-Tizen@main`.
 5. Confirme. O TizenBrew baixará o pacote e adicionará o **Cinefy** à lista.
 6. Ao abrir o Cinefy na TV, confira no canto inferior esquerdo se consta:
-   `Cinefy TV v1.1.0 (Tizen 3.0 Edition)`.
+   `Cinefy TV v1.3.0 (Tizen 3.0 Edition)`.

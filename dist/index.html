@@ -34,7 +34,7 @@
                 </button>
             </nav>
             <div class="sidebar-footer" id="app-version-badge">
-                Cinefy TV v1.2.0<br>Tizen 3.0 Edition
+                Cinefy TV v1.3.0<br>Tizen 3.0 Edition
             </div>
         </div>
 
@@ -229,12 +229,14 @@
                 </div>
 
                 <div class="player-controls">
-                    <div class="progress-bar-wrap">
-                        <div class="progress-track">
+                    <div class="progress-bar-wrap focusable" id="player-progress-bar" tabindex="0">
+                        <div class="progress-track" id="player-progress-track">
                             <div id="player-progress-fill" class="progress-fill"></div>
+                            <div id="player-scrub-handle" class="scrub-handle"></div>
                         </div>
                         <div class="time-row">
                             <span id="player-current-time">00:00</span>
+                            <span id="player-scrub-badge" class="scrub-badge" style="display: none;"></span>
                             <span id="player-duration">00:00</span>
                         </div>
                     </div>

@@ -166,6 +166,13 @@ const domElements = {
     'player-rewind-btn': createMockElement('button', 'player-rewind-btn', 'focusable'),
     'player-forward-btn': createMockElement('button', 'player-forward-btn', 'focusable'),
     'player-quality-btn': createMockElement('button', 'player-quality-btn', 'focusable'),
+    'player-progress-bar': createMockElement('div', 'player-progress-bar', 'progress-bar-wrap focusable'),
+    'player-progress-track': createMockElement('div', 'player-progress-track'),
+    'player-progress-fill': createMockElement('div', 'player-progress-fill'),
+    'player-scrub-handle': createMockElement('div', 'player-scrub-handle'),
+    'player-scrub-badge': createMockElement('div', 'player-scrub-badge'),
+    'player-current-time': createMockElement('div', 'player-current-time'),
+    'player-duration': createMockElement('div', 'player-duration'),
     'quality-modal': createMockElement('div', 'quality-modal'),
     'quality-options-list': createMockElement('div', 'quality-options-list'),
     'modal-overlay': createMockElement('div', 'modal-overlay'),
@@ -558,9 +565,119 @@ setTimeout(() => {
             'Resposta da busca mais recente (req2) é aceita e renderizada');
 
         // ========================================================
-        // BLOCO 5: DIFERENCIAÇÃO FORMAL DOS NÍVEIS DE TESTE
+        // BLOCO 5: LINHA DO TEMPO, FOCO, PROGRESSO E DATAS
         // ========================================================
-        console.log('\n--- BLOCO 5: Níveis de Teste & Evidências Reais ---');
+        console.log('\n--- BLOCO 5: Linha do Tempo, Foco, Progresso e Datas ---');
+
+        // Teste 5.1: Armazenamento e recuperação de progresso assistido
+        Storage.saveWatchProgress('vid-test-123', 345, 1200);
+        const savedProgress = Storage.getWatchProgress('vid-test-123');
+        assert(savedProgress !== null && savedProgress.watchTime === 345,
+            'Storage salva e recupera progresso assistido (watchTime: 345s)');
+        assert(savedProgress && savedProgress.duration === 1200,
+            'Storage armazena duração total correspondente (duration: 1200s)');
+
+        // Teste 5.2: Limpeza de progresso ao concluir vídeo
+        Storage.clearWatchProgress('vid-test-123');
+        assert(Storage.getWatchProgress('vid-test-123') === null,
+            'clearWatchProgress() limpa o progresso após o vídeo terminar');
+
+        // Teste 5.3: Cálculo e formatação de datas relativas ("há X dias", etc.)
+        const nowMs = Date.now();
+        const twoDaysAgo = new Date(nowMs - (2 * 24 * 60 * 60 * 1000)).toISOString();
+        const threeHoursAgo = new Date(nowMs - (3 * 60 * 60 * 1000)).toISOString();
+        const fiveMinAgo = new Date(nowMs - (5 * 60 * 1000)).toISOString();
+
+        assert(UI.formatRelativeTime(twoDaysAgo) === 'há 2 dias',
+            'formatRelativeTime() formata corretamente "há 2 dias"');
+        assert(UI.formatRelativeTime(threeHoursAgo) === 'há 3 horas',
+            'formatRelativeTime() formata corretamente "há 3 horas"');
+        assert(UI.formatRelativeTime(fiveMinAgo) === 'há 5 min',
+            'formatRelativeTime() formata corretamente "há 5 min"');
+        assert(UI.formatRelativeTime(null) === '',
+            'formatRelativeTime() trata valores nulos com segurança');
+
+        // Teste 5.4: Preservação e restauração exata de foco ao fechar o player
+        const mockEpisodeCard = createMockElement('div', 'card-ep-4', 'video-card focusable');
+        domElements['view-home'].appendChild(mockEpisodeCard);
+        Nav.focus(mockEpisodeCard);
+
+        Player.open({
+            id: 'video-card-focus-test',
+            title: 'Episódio Teste 4',
+            stream: { duration: 1800, resolutions: [1080] },
+            playback: { url: 'https://cdn.cinefy.gg/test/playlist.m3u8', authorization: 'tok' }
+        }, mockEpisodeCard);
+
+        assert(Player.triggerElement === mockEpisodeCard,
+            'Player.open() memoriza o elemento/card exato que iniciou a reprodução');
+
+        Player.close();
+
+        assert(Nav.currentFocus === mockEpisodeCard,
+            'Player.close() restaura o foco no episódio assistido em vez de resetar para o início');
+
+        // Teste 5.5: Navegação e scrub na linha do tempo com D-Pad
+        Player.startPlayback({
+            id: 'video-scrub-test',
+            title: 'Scrub Test Video',
+            stream: { duration: 3600, resolutions: [1080] },
+            playback: { url: 'https://cdn.cinefy.gg/test/playlist.m3u8', authorization: 'tok' }
+        });
+        videoMock.currentTime = 100;
+        videoMock.duration = 3600;
+
+        const progressBarEl = domElements['player-progress-bar'];
+        Nav.focus(progressBarEl);
+
+        // Disparar seta Direita (keyCode 39)
+        Player.handleKeyDown({ keyCode: 39, which: 39, preventDefault: function() {} });
+
+        assert(Player._scrubTargetTime === 110,
+            'Pressionar Direita na timeline avança 10s no target de scrub (110s)');
+        assert(domElements['player-scrub-badge'].style.display !== 'none',
+            'Badge visual de scrub é exibido imediatamente durante a navegação');
+
+        // Teste de aceleração ao segurar seta Direita
+        Player._scrubHoldCount = 5;
+        Player.handleKeyDown({ keyCode: 39, which: 39, preventDefault: function() {} });
+        assert(Player._scrubTargetTime === 140,
+            'Repetição contínua da tecla acelera o scrub para saltos de 30s');
+
+        Player._scrubHoldCount = 10;
+        Player.handleKeyDown({ keyCode: 39, which: 39, preventDefault: function() {} });
+        assert(Player._scrubTargetTime === 200,
+            'Alta repetição contínua acelera o scrub para saltos de 60s (1 min)');
+
+        // Commit do scrub
+        Player.commitScrub();
+        assert(videoMock.currentTime === 200,
+            'commitScrub() aplica a posição final solicitada no elemento de vídeo nativo');
+        assert(domElements['player-scrub-badge'].style.display === 'none',
+            'Badge de scrub é ocultado após commit');
+
+        // Teste 5.6: Retomada de onde parou (pendingResumeTime)
+        Storage.saveWatchProgress('video-resume-check', 450, 3000);
+        Player.open({
+            id: 'video-resume-check',
+            title: 'Resume Test',
+            stream: { duration: 3000, resolutions: [1080] },
+            playback: { url: 'https://cdn.cinefy.gg/test/playlist.m3u8', authorization: 'tok' }
+        });
+
+        assert(Player.pendingResumeTime === 450,
+            'Vídeo com histórico salvo inicializa com pendingResumeTime = 450s');
+
+        Player.applyPendingResume();
+        assert(videoMock.currentTime === 450,
+            'applyPendingResume() posiciona currentTime no ponto exato onde o usuário parou');
+
+        Player.close();
+
+        // ========================================================
+        // BLOCO 6: DIFERENCIAÇÃO FORMAL DOS NÍVEIS DE TESTE
+        // ========================================================
+        console.log('\n--- BLOCO 6: Níveis de Teste & Evidências Reais ---');
         console.log('1. Simulação Automatizada (Node.js):');
         console.log('   - Código real de dist/app.js executado com sucesso.');
         console.log('   - Storage isolado, fallback em quota excedida, concorrência de busca e ciclo de vida validados.');
