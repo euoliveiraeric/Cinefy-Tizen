@@ -10,7 +10,7 @@
     // 1. CONFIGURAÇÕES & CONSTANTES
     // ==========================================
     var CONFIG = {
-        VERSION: '1.1.1',
+        VERSION: '1.1.2',
         API_URL: 'https://api.cinefy.gg',
         PUBLIC_CDN: 'https://cdn.cinefy.gg',
         VIDEOS_CDN: 'https://videos.cinefy.gg',
@@ -237,7 +237,7 @@
                 email: email,
                 password: password,
                 session: {
-                    platform: 'Tizen SmartTV',
+                    platform: 'web',
                     platformLang: 'pt-BR',
                     platformTimeZone: 'America/Sao_Paulo',
                     screenWidth: 1920,
@@ -1532,8 +1532,18 @@
 
             Api.login(email, password)
                 .then(function(res) {
+                    var token = null;
                     if (res && res.data && res.data.accessToken) {
-                        var token = res.data.accessToken;
+                        token = res.data.accessToken;
+                    } else if (res && res.data && res.data.token) {
+                        token = res.data.token;
+                    } else if (res && res.token) {
+                        token = res.token;
+                    } else if (res && res.accessToken) {
+                        token = res.accessToken;
+                    }
+
+                    if (token) {
                         Storage.setToken(token);
                         UI.showToast('Login realizado com sucesso!', 'success');
 
@@ -1550,7 +1560,14 @@
                 })
                 .catch(function(err) {
                     console.error('Falha no login:', err);
-                    var msg = (err.data && err.data.message) ? err.data.message : 'E-mail ou senha incorretos.';
+                    var msg = 'E-mail ou senha incorretos.';
+                    if (err && err.data) {
+                        if (err.data.message) {
+                            msg = err.data.message;
+                        } else if (err.data.error) {
+                            msg = err.data.error;
+                        }
+                    }
                     self.showModal('Falha na Autenticação', msg);
                 });
         },

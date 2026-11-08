@@ -334,6 +334,27 @@ assert(writeResult === false, 'Storage.setItem() captura QuotaExceededError e re
 assert(Storage.getItem('session_flag') === 'ativo', 'Storage recupera valor retido no _memoryFallback volátil');
 simulateQuotaError = false;
 
+// Teste 1.5: Payload de login em conformidade com schema estrito da API Cinefy v2
+let capturedLoginOptions = null;
+let capturedLoginUrl = null;
+const originalApiRequest = Api.request;
+Api.request = function(endpoint, options) {
+    capturedLoginUrl = endpoint;
+    capturedLoginOptions = options;
+    return Promise.resolve({ data: { accessToken: 'dummy_token' } });
+};
+
+Api.login('usuario@exemplo.com', 'senha123');
+
+assert(capturedLoginUrl === '/v2/auth/login', 'Api.login() dispara requisição para /v2/auth/login');
+assert(capturedLoginOptions && capturedLoginOptions.method === 'POST', 'Api.login() utiliza método POST');
+assert(capturedLoginOptions.body && capturedLoginOptions.body.session && capturedLoginOptions.body.session.platform === 'web',
+    'Api.login() envia session.platform = "web" (exigência estrita do backend Cinefy v2)');
+assert(capturedLoginOptions.body.session.platform !== 'Tizen SmartTV',
+    'Api.login() não envia valores rejeitados pelo backend como "Tizen SmartTV"');
+
+Api.request = originalApiRequest;
+
 
 // ========================================================
 // BLOCO 2: PLAYER REAL, QUALIDADE EFETIVA & SEM BOTÕES FICTÍCIOS
