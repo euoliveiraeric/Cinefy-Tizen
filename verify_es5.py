@@ -1,35 +1,32 @@
-import re
+"""
+Script de validação de compatibilidade ES5 real via AST (ECMAScript 5).
+Executa o parser Acorn (ECMAScript 5 strict) para garantir que nenhum constructo
+ES6+ esteja presente no código JavaScript que rodará no Chromium 47 da TV.
+"""
 
-with open('dist/app.js', 'r', encoding='utf-8') as f:
-    code = f.read()
+import subprocess
+import sys
+import os
 
-# Check for forbidden ES6+ constructs
-forbidden = {
-    'const ': r'\bconst\s+[a-zA-Z0-9_]+',
-    'let ': r'\blet\s+[a-zA-Z0-9_]+',
-    'arrow function': r'(=>|\([a-zA-Z0-9_,\s]*\)\s*=>)',
-    'class keyword': r'\bclass\s+[a-zA-Z0-9_]+',
-    'optional chaining': r'\?\.',
-    'nullish coalescing': r'\?\?',
-    'async function': r'\basync\s+function|\basync\s*\(',
-    'await keyword': r'\bawait\s+',
-    'template literal': r'`[^`]*`'
-}
+def main():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    js_validator = os.path.join(script_dir, "verify_es5.js")
 
-print(f"Total lines in dist/app.js: {len(code.splitlines())}")
+    print("[ES5 AST Validator] Iniciando análise sintática real ECMAScript 5...")
+    try:
+        res = subprocess.run(
+            ["node", js_validator],
+            cwd=script_dir,
+            capture_output=True,
+            text=True
+        )
+        print(res.stdout)
+        if res.stderr:
+            print(res.stderr, file=sys.stderr)
+        sys.exit(res.returncode)
+    except FileNotFoundError:
+        print("ERRO: Node.js não foi encontrado no PATH para executar o parser Acorn ES5.", file=sys.stderr)
+        sys.exit(1)
 
-has_error = False
-for name, pattern in forbidden.items():
-    matches = list(re.finditer(pattern, code))
-    if matches:
-        print(f"FAILED: Found {len(matches)} occurrences of {name}:")
-        for m in matches[:5]:
-            start = max(0, m.start() - 30)
-            end = min(len(code), m.end() + 30)
-            print(f"  Line snippet: {repr(code[start:end])}")
-        has_error = True
-    else:
-        print(f"PASSED: No {name} found.")
-
-if not has_error:
-    print("\nSUCCESS: dist/app.js is 100% STRICT ES5!")
+if __name__ == "__main__":
+    main()

@@ -745,7 +745,10 @@ body, html {
     align-items: center;
     -webkit-justify-content: center;
     justify-content: center;
-    gap: 20px;
+}
+
+.control-buttons-row .player-btn {
+    margin: 0 10px;
 }
 
 .player-btn {
@@ -866,7 +869,12 @@ body, html {
     display: flex;
     -webkit-justify-content: center;
     justify-content: center;
-    gap: 15px;
+}
+
+.modal-actions button,
+.modal-actions .btn-primary,
+.modal-actions .btn-danger {
+    margin: 0 10px;
 }
 
 .toast-container {

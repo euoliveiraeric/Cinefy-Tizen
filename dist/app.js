@@ -19,21 +19,35 @@
     };
 
     // ==========================================
-    // 2. ISOLAMENTO DE ARMAZENAMENTO (STORAGE)
-    // Preserva StremioK-PTBR e outros módulos
+    // 2. ARMAZENAMENTO & SESSÃO (STORAGE)
+    // No TizenBrew, todos os módulos compartilham a mesma
+    // origem web (file:// ou localhost) e a mesma quota de
+    // localStorage (aprox. 5MB). O prefixo "cinefy_" evita
+    // colisões de chaves com StremioK-PTBR e outros módulos,
+    // mas NÃO constitui sandbox isolado ou cofre criptografado.
+    // NUNCA executar localStorage.clear().
     // ==========================================
     var Storage = {
         getItem: function(key) {
             try {
                 return localStorage.getItem(CONFIG.STORAGE_PREFIX + key);
             } catch (e) {
+                console.error('Falha ao ler localStorage:', e);
                 return null;
             }
         },
         setItem: function(key, val) {
             try {
                 localStorage.setItem(CONFIG.STORAGE_PREFIX + key, val);
-            } catch (e) {}
+                return true;
+            } catch (e) {
+                // Tratar estouro de quota ou restrição de armazenamento do browser da TV
+                console.error('Falha ao gravar no localStorage (possível quota excedida):', e);
+                if (typeof UI !== 'undefined' && UI.showToast) {
+                    UI.showToast('Aviso: Limite de armazenamento local atingido na TV.');
+                }
+                return false;
+            }
         },
         removeItem: function(key) {
             try {
@@ -63,7 +77,7 @@
             }
         },
         clearAuth: function() {
-            // NUNCA chamar localStorage.clear()! Apenas as chaves do Cinefy
+            // NUNCA chamar localStorage.clear()! Apenas as chaves exclusivas do Cinefy
             this.removeItem('token');
             this.removeItem('user');
         }
@@ -74,6 +88,7 @@
     // ==========================================
     var Api = {
         request: function(endpoint, options) {
+            var self = this;
             options = options || {};
             var method = options.method || 'GET';
             var headers = options.headers || {};
@@ -84,9 +99,10 @@
                 headers['Authorization'] = 'Bearer ' + token;
             }
 
-            if (options.body && typeof options.body === 'object') {
+            var requestBody = options.body;
+            if (requestBody && typeof requestBody === 'object') {
                 headers['Content-Type'] = 'application/json';
-                options.body = JSON.stringify(options.body);
+                requestBody = JSON.stringify(requestBody);
             }
 
             var url = (endpoint.indexOf('http') === 0) ? endpoint : (CONFIG.API_URL + endpoint);
@@ -112,6 +128,20 @@
 
                     if (xhr.status >= 200 && xhr.status < 300) {
                         resolve(data);
+                    } else if (xhr.status === 401) {
+                        // Sessão expirada ou token revogado
+                        if (token) {
+                            console.log('Sessão expirada detectada (HTTP 401). Limpando autenticação.');
+                            Storage.clearAuth();
+                            if (typeof UI !== 'undefined' && UI.updateAccountView) {
+                                UI.updateAccountView();
+                                UI.showToast('Sessão Cinefy expirada. Conecte-se novamente.');
+                            }
+                        }
+                        var err401 = new Error((data && data.message) ? data.message : 'Sessão expirada ou não autorizada.');
+                        err401.status = 401;
+                        err401.data = data;
+                        reject(err401);
                     } else {
                         var errMessage = (data && data.message) ? data.message : ('Erro HTTP ' + xhr.status);
                         var err = new Error(errMessage);
@@ -122,14 +152,29 @@
                 };
 
                 xhr.onerror = function() {
+                    // Tentativa única de reconexão para instabilidades de rede
+                    if (!options._retried) {
+                        options._retried = true;
+                        setTimeout(function() {
+                            self.request(endpoint, options).then(resolve).catch(reject);
+                        }, 1200);
+                        return;
+                    }
                     reject(new Error('Erro de conexão com o servidor do Cinefy.'));
                 };
 
                 xhr.ontimeout = function() {
+                    if (!options._retried) {
+                        options._retried = true;
+                        setTimeout(function() {
+                            self.request(endpoint, options).then(resolve).catch(reject);
+                        }, 1200);
+                        return;
+                    }
                     reject(new Error('Tempo limite esgotado ao contatar o Cinefy.'));
                 };
 
-                xhr.send(options.body || null);
+                xhr.send(requestBody || null);
             });
         },
 
@@ -568,32 +613,61 @@
         open: function(videoData) {
             var self = this;
             this.currentVideo = videoData;
-            UI.showToast('Carregando vídeo: ' + videoData.title);
+            UI.showToast('Carregando vídeo: ' + (videoData.title || 'Vídeo'));
 
-            // Buscar dados completos de playback
+            // Buscar dados completos de vídeo e autorização de playback
             Api.getVideo(videoData.id)
                 .then(function(fullData) {
-                    self.startPlayback(fullData);
+                    var merged = videoData;
+                    if (fullData && typeof fullData === 'object') {
+                        // Incorporar dados completos retornados pela API
+                        for (var key in fullData) {
+                            if (fullData.hasOwnProperty(key)) {
+                                merged[key] = fullData[key];
+                            }
+                        }
+                    }
+
+                    if (merged.playback && merged.playback.authorization) {
+                        self.startPlayback(merged);
+                    } else {
+                        self.handleAccessRequired(merged);
+                    }
                 })
                 .catch(function(err) {
-                    console.error('Erro ao buscar detalhes de vídeo:', err);
+                    console.log('Detalhes da API de vídeo (status):', err.status || err.message);
+
+                    // Se a listagem já trouxe autorização de playback:
+                    if (videoData.playback && videoData.playback.authorization) {
+                        self.startPlayback(videoData);
+                        return;
+                    }
+
                     if (err.status === 401 || err.status === 403) {
                         UI.showModal(
                             'Conteúdo Restrito',
-                            'Este vídeo exige login ou assinatura do canal no Cinefy. Deseja acessar sua conta agora?',
+                            'Este vídeo exige login ou assinatura ativa do canal no Cinefy. Deseja acessar sua conta agora?',
                             function() {
                                 UI.showView('account');
                             }
                         );
                     } else {
-                        // Tentar fallback se for vídeo free ou tiver streamId
-                        if (videoData.type === 'free' || (videoData.stream && videoData.stream.hasMP4Fallback)) {
-                            self.startFallbackFree(videoData);
-                        } else {
-                            UI.showModal('Aviso Cinefy', 'Este vídeo não pôde ser reproduzido (' + (err.message || 'Restrito') + ').');
-                        }
+                        self.handleAccessRequired(videoData, err);
                     }
                 });
+        },
+
+        handleAccessRequired: function(videoData, err) {
+            var isFree = (videoData.type === 'free');
+            var msg = isFree
+                ? 'Os servidores BunnyCDN do Cinefy exigem token assinado de sessão para autorizar o streaming deste vídeo. Por favor, faça login na sua conta Cinefy na aba "Minha Conta".'
+                : 'Este vídeo VOD é restrito a assinantes do canal. Acesse "Minha Conta" para conectar sua conta Cinefy.';
+
+            UI.showModal('Aviso de Streaming Cinefy', msg, function() {
+                if (!Storage.getToken()) {
+                    UI.showView('account');
+                }
+            });
         },
 
         startPlayback: function(videoData) {
@@ -604,18 +678,19 @@
             document.getElementById('player-video-title').textContent = videoData.title || 'Vídeo';
             document.getElementById('player-video-author').textContent = (videoData.author && videoData.author.displayName) ? videoData.author.displayName : '';
 
-            // Extrair stream
+            // Construir URL oficial BunnyCDN assinada conforme API do Cinefy
             var streamUrl = '';
             var playback = videoData.playback;
             var stream = videoData.stream;
 
-            if (playback && playback.url) {
-                streamUrl = playback.url;
-            } else if (playback && playback.baseUrl && playback.authorization && playback.streamId) {
-                streamUrl = playback.baseUrl + '/' + playback.authorization + '/' + playback.streamId + '/playlist.m3u8';
-            } else if (stream && stream.id) {
-                // Montar HLS padrão
-                streamUrl = CONFIG.VIDEOS_CDN + '/' + (playback ? playback.authorization : '') + '/' + stream.id + '/playlist.m3u8';
+            if (playback) {
+                if (playback.url) {
+                    streamUrl = playback.url;
+                } else if (playback.baseUrl && playback.authorization && playback.streamId) {
+                    streamUrl = playback.baseUrl + '/' + playback.authorization + '/' + playback.streamId + '/playlist.m3u8';
+                } else if (playback.authorization && stream && stream.id) {
+                    streamUrl = CONFIG.VIDEOS_CDN + '/' + playback.authorization + '/' + stream.id + '/playlist.m3u8';
+                }
             }
 
             // Configurar resoluções disponíveis
@@ -623,19 +698,19 @@
             this.buildQualityOptions();
 
             if (!streamUrl) {
-                UI.showModal('Erro de Reprodução', 'Stream não encontrado para este vídeo.');
+                UI.showModal('Erro de Reprodução', 'Stream não encontrado ou autorização ausente para este vídeo.');
                 this.close();
                 return;
             }
 
-            console.log('Iniciando reprodução:', streamUrl);
+            console.log('Iniciando reprodução no elemento <video> HTML5...');
             this.videoEl.src = streamUrl;
             this.videoEl.load();
 
             var playPromise = this.videoEl.play();
             if (playPromise !== undefined) {
                 playPromise.catch(function(err) {
-                    console.log('Play autoplay prevenido ou erro:', err);
+                    console.log('Play autoplay prevenido ou erro inicial:', err);
                 });
             }
 
@@ -643,48 +718,38 @@
             Nav.focus(document.getElementById('player-play-btn'));
         },
 
-        startFallbackFree: function(videoData) {
-            var stream = videoData.stream;
-            if (!stream || !stream.id) {
-                UI.showModal('Erro', 'Vídeo gratuito indisponível.');
-                return;
-            }
-
-            var container = document.getElementById('player-container');
-            container.classList.add('active');
-            this.isActive = true;
-
-            document.getElementById('player-video-title').textContent = videoData.title || 'Vídeo';
-            document.getElementById('player-video-author').textContent = (videoData.author && videoData.author.displayName) ? videoData.author.displayName : '';
-
-            var mp4Url = CONFIG.FREE_VIDEOS_CDN + '/' + stream.id + '/play_720p.mp4';
-            console.log('Reproduzindo via fallback gratuito:', mp4Url);
-
-            this.videoEl.src = mp4Url;
-            this.videoEl.load();
-            this.videoEl.play();
-
-            this.showOsd();
-            Nav.focus(document.getElementById('player-play-btn'));
-        },
-
         handlePlaybackError: function() {
-            var self = this;
-            if (!this.currentVideo) return;
-            var stream = this.currentVideo.stream;
+            var err = this.videoEl ? this.videoEl.error : null;
+            var code = err ? err.code : 0;
+            var playback = this.currentVideo ? this.currentVideo.playback : null;
+            var stream = this.currentVideo ? this.currentVideo.stream : null;
 
-            // Se falhou HLS, tentar fallback MP4
-            if (stream && stream.id && this.videoEl.src.indexOf('.mp4') === -1) {
-                console.log('Tentando fallback para MP4 720p...');
-                var mp4Fallback = CONFIG.VIDEOS_CDN + '/' + stream.id + '/play_720p.mp4';
+            console.error('Evento de erro no leitor <video> HTML5. Código:', code);
+
+            // Se falhou HLS e temos autorização + fallback MP4
+            if (playback && playback.baseUrl && playback.authorization && playback.streamId &&
+                this.videoEl.src.indexOf('.mp4') === -1 && stream && stream.hasMP4Fallback) {
+                console.log('Tentando reproduzir fallback MP4 assinado 720p...');
+                var mp4Fallback = playback.baseUrl + '/' + playback.authorization + '/' + playback.streamId + '/play_720p.mp4';
                 this.videoEl.src = mp4Fallback;
                 this.videoEl.load();
                 this.videoEl.play();
-                UI.showToast('Alternando para formato compatível (MP4)...');
+                UI.showToast('Tentando formato alternativo (MP4)...');
                 return;
             }
 
-            UI.showModal('Erro no Vídeo', 'Não foi possível reproduzir este vídeo na sua TV.');
+            var reason = 'Falha desconhecida no leitor de mídia.';
+            if (code === 1) {
+                reason = 'Reprodução abortada pelo sistema.';
+            } else if (code === 2) {
+                reason = 'Erro de rede ao baixar os segmentos do vídeo da CDN (verifique sua conexão ou validade do token).';
+            } else if (code === 3) {
+                reason = 'Falha na decodificação do vídeo pelo hardware do televisor.';
+            } else if (code === 4) {
+                reason = 'Formato ou codec não suportado pelo navegador Chromium 47 da TV.';
+            }
+
+            UI.showModal('Erro no Vídeo', reason);
             this.close();
         },
 
@@ -810,7 +875,6 @@
         },
 
         setQuality: function(qualityStr) {
-            UI.showToast('Qualidade alterada para ' + qualityStr);
             var modal = document.getElementById('quality-modal');
             modal.classList.remove('active');
 
@@ -820,6 +884,36 @@
                 if (opts[i].textContent === qualityStr) {
                     opts[i].classList.add('selected');
                 }
+            }
+
+            this.currentQuality = qualityStr;
+            var playback = (this.currentVideo && this.currentVideo.playback) ? this.currentVideo.playback : null;
+            var stream = (this.currentVideo && this.currentVideo.stream) ? this.currentVideo.stream : null;
+
+            if (playback && playback.authorization && playback.streamId) {
+                var curTime = this.videoEl ? (this.videoEl.currentTime || 0) : 0;
+                var wasPaused = this.videoEl ? this.videoEl.paused : false;
+                var newUrl = '';
+
+                if (qualityStr === 'Auto') {
+                    newUrl = playback.baseUrl + '/' + playback.authorization + '/' + playback.streamId + '/playlist.m3u8';
+                    UI.showToast('Qualidade: Automático (HLS Adaptativo)');
+                } else if (stream && stream.hasMP4Fallback && qualityStr === '720p') {
+                    newUrl = playback.baseUrl + '/' + playback.authorization + '/' + playback.streamId + '/play_720p.mp4';
+                    UI.showToast('Qualidade: MP4 720p fixo');
+                } else {
+                    UI.showToast('Qualidade solicitada: ' + qualityStr + ' (HLS)');
+                }
+
+                if (newUrl && this.videoEl.src !== newUrl) {
+                    this.videoEl.src = newUrl;
+                    this.videoEl.currentTime = curTime;
+                    if (!wasPaused) {
+                        this.videoEl.play();
+                    }
+                }
+            } else {
+                UI.showToast('Qualidade: ' + qualityStr);
             }
 
             Nav.focus(document.getElementById('player-quality-btn'));
@@ -1401,13 +1495,89 @@
     };
 
     // ==========================================
-    // 8. INICIALIZAÇÃO GERAL DO APLICATIVO
+    // 8. CICLO DE VIDA DO APLICATIVO (LIFECYCLE)
+    // Trata suspensão, retorno de outro app e retomada
+    // ==========================================
+    var Lifecycle = {
+        lastActiveTime: Date.now(),
+        REFRESH_INTERVAL: 10 * 60 * 1000, // 10 minutos de inatividade para recarregar home
+
+        init: function() {
+            var self = this;
+
+            // Evento padrão W3C Page Visibility
+            document.addEventListener('visibilitychange', function() {
+                if (document.visibilityState === 'visible') {
+                    self.onResume();
+                } else {
+                    self.onSuspend();
+                }
+            });
+
+            // Evento Pageshow / Pagehide
+            window.addEventListener('pageshow', function() {
+                self.onResume();
+            });
+
+            // Eventos Tizen Application Lifecycle (se disponíveis na TV)
+            if (window.tizen && window.tizen.application) {
+                try {
+                    var curApp = window.tizen.application.getCurrentApplication();
+                    curApp.addEventListener('resume', function() {
+                        self.onResume();
+                    });
+                    curApp.addEventListener('pause', function() {
+                        self.onSuspend();
+                    });
+                } catch (e) {
+                    console.log('Tizen app lifecycle event notice:', e);
+                }
+            }
+        },
+
+        onSuspend: function() {
+            this.lastActiveTime = Date.now();
+        },
+
+        onResume: function() {
+            var now = Date.now();
+            var elapsed = now - this.lastActiveTime;
+            this.lastActiveTime = now;
+
+            // Se o player estiver ativo (reproduzindo vídeo), NUNCA interromper a reprodução!
+            if (Player.isActive) {
+                console.log('Retomando com player ativo; reprodução preservada.');
+                return;
+            }
+
+            // Se a tela atual for busca com resultados, NUNCA descartar a busca do usuário
+            if (UI.currentView === 'search') {
+                console.log('Retomando na tela de busca; termos e resultados preservados.');
+                return;
+            }
+
+            // Se passaram mais de 10 minutos desde a última atividade, revalidar sessão e atualizar catálogo
+            if (elapsed > this.REFRESH_INTERVAL) {
+                console.log('Retomado após ' + Math.round(elapsed / 1000) + 's de inatividade. Revalidando sessão...');
+                UI.checkSession();
+                if (UI.currentView === 'home') {
+                    UI.loadHome();
+                } else if (UI.currentView === 'creators') {
+                    UI.loadAllCreators();
+                }
+            }
+        }
+    };
+
+    // ==========================================
+    // 9. INICIALIZAÇÃO GERAL DO APLICATIVO
     // ==========================================
     window.addEventListener('DOMContentLoaded', function() {
         Nav.init();
         Player.init();
         Keyboard.init();
         UI.init();
+        Lifecycle.init();
     });
 
 })();
