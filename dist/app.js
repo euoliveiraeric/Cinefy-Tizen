@@ -10,6 +10,7 @@
     // 1. CONFIGURAÇÕES & CONSTANTES
     // ==========================================
     var CONFIG = {
+        VERSION: '1.1.0',
         API_URL: 'https://api.cinefy.gg',
         PUBLIC_CDN: 'https://cdn.cinefy.gg',
         VIDEOS_CDN: 'https://videos.cinefy.gg',
@@ -21,30 +22,40 @@
     // ==========================================
     // 2. ARMAZENAMENTO & SESSÃO (STORAGE)
     // No TizenBrew, todos os módulos compartilham a mesma
-    // origem web (file:// ou localhost) e a mesma quota de
-    // localStorage (aprox. 5MB). O prefixo "cinefy_" evita
-    // colisões de chaves com StremioK-PTBR e outros módulos,
-    // mas NÃO constitui sandbox isolado ou cofre criptografado.
+    // origem web (file:// ou localhost) e o mesmo armazenamento
+    // local (a quota depende do modelo da TV e versão do Tizen;
+    // não há quota universal garantida).
+    // O prefixo "cinefy_" é uma convenção de namespace para
+    // evitar conflitos de chaves com o StremioK-PTBR e outros módulos,
+    // mas NÃO constitui isolamento de segurança nem cofre criptografado.
     // NUNCA executar localStorage.clear().
+    // Em caso de QuotaExceededError, a aplicação retém os dados
+    // em memória volátil durante a sessão sem falhar bruscamente.
     // ==========================================
     var Storage = {
+        _memoryFallback: {},
+
         getItem: function(key) {
             try {
-                return localStorage.getItem(CONFIG.STORAGE_PREFIX + key);
+                var val = localStorage.getItem(CONFIG.STORAGE_PREFIX + key);
+                if (val !== null) return val;
+                return this._memoryFallback[key] || null;
             } catch (e) {
                 console.error('Falha ao ler localStorage:', e);
-                return null;
+                return this._memoryFallback[key] || null;
             }
         },
         setItem: function(key, val) {
             try {
                 localStorage.setItem(CONFIG.STORAGE_PREFIX + key, val);
+                delete this._memoryFallback[key];
                 return true;
             } catch (e) {
                 // Tratar estouro de quota ou restrição de armazenamento do browser da TV
-                console.error('Falha ao gravar no localStorage (possível quota excedida):', e);
+                console.error('Falha ao gravar no localStorage (quota excedida ou bloqueada):', e);
+                this._memoryFallback[key] = String(val);
                 if (typeof UI !== 'undefined' && UI.showToast) {
-                    UI.showToast('Aviso: Limite de armazenamento local atingido na TV.');
+                    UI.showToast('Aviso: Armazenamento local da TV cheio. Usando memória temporária.');
                 }
                 return false;
             }
@@ -53,6 +64,7 @@
             try {
                 localStorage.removeItem(CONFIG.STORAGE_PREFIX + key);
             } catch (e) {}
+            delete this._memoryFallback[key];
         },
         getToken: function() {
             return this.getItem('token');
@@ -557,6 +569,7 @@
         currentVideo: null,
         qualities: [],
         currentQuality: null,
+        effectiveResolution: null,
 
         init: function() {
             var self = this;
@@ -565,8 +578,13 @@
 
             if (!this.videoEl) return;
 
+            this.videoEl.addEventListener('loadedmetadata', function() {
+                self.updateEffectiveResolution();
+            });
+
             this.videoEl.addEventListener('timeupdate', function() {
                 self.updateProgress();
+                self.updateEffectiveResolution();
             });
 
             this.videoEl.addEventListener('play', function() {
@@ -674,6 +692,7 @@
             var container = document.getElementById('player-container');
             container.classList.add('active');
             this.isActive = true;
+            this.currentVideo = videoData;
 
             document.getElementById('player-video-title').textContent = videoData.title || 'Vídeo';
             document.getElementById('player-video-author').textContent = (videoData.author && videoData.author.displayName) ? videoData.author.displayName : '';
@@ -693,8 +712,9 @@
                 }
             }
 
-            // Configurar resoluções disponíveis
-            this.qualities = (stream && stream.resolutions) ? stream.resolutions : [1080, 720, 480];
+            // Resoluções reais fornecidas pela CDN/API do Cinefy
+            this.qualities = (stream && stream.resolutions && stream.resolutions.length) ? stream.resolutions : [];
+            this.currentQuality = 'Auto';
             this.buildQualityOptions();
 
             if (!streamUrl) {
@@ -714,6 +734,19 @@
                 });
             }
 
+            // Notificar usuário sobre o início da reprodução HLS
+            var maxRes = 0;
+            if (this.qualities.length) {
+                for (var q = 0; q < this.qualities.length; q++) {
+                    if (this.qualities[q] > maxRes) maxRes = this.qualities[q];
+                }
+            }
+            if (maxRes > 0) {
+                UI.showToast('Iniciando: HLS Adaptativo (catálogo até ' + maxRes + 'p)');
+            } else {
+                UI.showToast('Iniciando: HLS Adaptativo');
+            }
+
             this.showOsd();
             Nav.focus(document.getElementById('player-play-btn'));
         },
@@ -726,15 +759,23 @@
 
             console.error('Evento de erro no leitor <video> HTML5. Código:', code);
 
-            // Se falhou HLS e temos autorização + fallback MP4
+            // Se falhou HLS e temos autorização + fallback MP4 declarado
             if (playback && playback.baseUrl && playback.authorization && playback.streamId &&
                 this.videoEl.src.indexOf('.mp4') === -1 && stream && stream.hasMP4Fallback) {
-                console.log('Tentando reproduzir fallback MP4 assinado 720p...');
+                var self = this;
                 var mp4Fallback = playback.baseUrl + '/' + playback.authorization + '/' + playback.streamId + '/play_720p.mp4';
-                this.videoEl.src = mp4Fallback;
-                this.videoEl.load();
-                this.videoEl.play();
-                UI.showToast('Tentando formato alternativo (MP4)...');
+                // Não reduzir silenciosamente: informar a falha e oferecer escolha explícita ao usuário
+                UI.showModal(
+                    'Falha no Stream Principal',
+                    'O stream adaptativo HLS não pôde ser reproduzido. O servidor disponibiliza uma versão alternativa em MP4 720p. Deseja alternar para MP4 720p?',
+                    function() {
+                        self.videoEl.src = mp4Fallback;
+                        self.videoEl.load();
+                        self.videoEl.play();
+                        self.currentQuality = 'mp4_720p';
+                        UI.showToast('Alternado para MP4 720p');
+                    }
+                );
                 return;
             }
 
@@ -835,37 +876,72 @@
             }, 4500);
         },
 
+        updateEffectiveResolution: function() {
+            if (!this.videoEl) return;
+            var w = this.videoEl.videoWidth;
+            var h = this.videoEl.videoHeight;
+            if (w && h) {
+                this.effectiveResolution = w + 'x' + h;
+            }
+        },
+
         buildQualityOptions: function() {
             var listEl = document.getElementById('quality-options-list');
             listEl.innerHTML = '';
 
             var self = this;
-            var options = ['Auto'];
-            for (var i = 0; i < this.qualities.length; i++) {
-                options.push(this.qualities[i] + 'p');
+            var stream = (this.currentVideo && this.currentVideo.stream) ? this.currentVideo.stream : null;
+            var options = [];
+
+            // Opção 1: Automático HLS (Adaptação gerenciada pelo hardware da TV)
+            options.push({ label: 'Automático (HLS Adaptativo)', value: 'Auto' });
+
+            // Opção MP4 Fallback APENAS se confirmada expressamente pela API (hasMP4Fallback === true)
+            if (stream && stream.hasMP4Fallback === true) {
+                options.push({ label: 'MP4 720p (Fallback CDN direto)', value: 'mp4_720p' });
             }
 
             for (var j = 0; j < options.length; j++) {
                 (function(opt) {
                     var btn = document.createElement('button');
                     btn.className = 'quality-option focusable';
-                    btn.textContent = opt;
+                    btn.textContent = opt.label;
                     btn.setAttribute('tabindex', '0');
-                    if (opt === 'Auto') btn.classList.add('selected');
+                    btn.setAttribute('data-quality', opt.value);
+                    if (opt.value === self.currentQuality || (self.currentQuality === 'Auto' && opt.value === 'Auto')) {
+                        btn.classList.add('selected');
+                    }
 
                     btn.addEventListener('click', function() {
-                        self.setQuality(opt);
+                        self.setQuality(opt.value, opt.label);
                     });
 
                     listEl.appendChild(btn);
                 })(options[j]);
             }
+
+            // Exibir nota informativa honesta no modal de qualidade
+            var noteEl = document.createElement('div');
+            noteEl.className = 'quality-info-note';
+            noteEl.style.cssText = 'color: #8c8ca0; font-size: 14px; margin-top: 15px; text-align: left; line-height: 1.4;';
+
+            var encodedList = (this.qualities && this.qualities.length) ? this.qualities.join('p, ') + 'p' : 'Padrão da plataforma';
+            var currentEff = this.effectiveResolution || 'Aguardando decodificação do hardware';
+
+            noteEl.innerHTML = 
+                '<div style="margin-bottom:6px;"><strong style="color:#d0d0e0;">Resoluções no catálogo:</strong> ' + encodedList + '</div>' +
+                '<div style="margin-bottom:6px;"><strong style="color:#d0d0e0;">Resolução efetiva atual:</strong> ' + currentEff + '</div>' +
+                '<div style="font-size:12px; color:#707080;">O leitor nativo HTML5 gerencia a resolução dinamicamente via HLS adaptativo conforme a banda e o hardware da TV. O Chromium 47 não suporta seleção manual de variantes sem extensão MSE.</div>';
+
+            listEl.appendChild(noteEl);
         },
 
         toggleQualityModal: function() {
             var modal = document.getElementById('quality-modal');
             modal.classList.toggle('active');
             if (modal.classList.contains('active')) {
+                // Reconstruir para atualizar a resolução efetiva atual
+                this.buildQualityOptions();
                 var firstOption = modal.querySelector('.quality-option');
                 if (firstOption) Nav.focus(firstOption);
             } else {
@@ -874,35 +950,49 @@
             this.showOsd();
         },
 
-        setQuality: function(qualityStr) {
+        setQuality: function(qualityVal, qualityLabel) {
             var modal = document.getElementById('quality-modal');
             modal.classList.remove('active');
+
+            var playback = (this.currentVideo && this.currentVideo.playback) ? this.currentVideo.playback : null;
+            var stream = (this.currentVideo && this.currentVideo.stream) ? this.currentVideo.stream : null;
+
+            // Recusar seleções nominais fantasmas que não possuem stream separado
+            if (qualityVal !== 'Auto' && qualityVal !== 'mp4_720p') {
+                console.log('Seleção manual de variante nominal (' + qualityVal + ') não suportada pelo player nativo.');
+                UI.showToast('Controle manual de variante HLS não suportado no Chromium 47. Mantido modo Automático.');
+                Nav.focus(document.getElementById('player-quality-btn'));
+                return;
+            }
+
+            // Se for MP4 e o stream não possuir fallback comprovado pela API
+            if (qualityVal === 'mp4_720p' && (!stream || stream.hasMP4Fallback !== true)) {
+                UI.showToast('MP4 720p não disponibilizado pelo servidor para este vídeo.');
+                Nav.focus(document.getElementById('player-quality-btn'));
+                return;
+            }
 
             var opts = modal.querySelectorAll('.quality-option');
             for (var i = 0; i < opts.length; i++) {
                 opts[i].classList.remove('selected');
-                if (opts[i].textContent === qualityStr) {
+                if (opts[i].getAttribute('data-quality') === qualityVal) {
                     opts[i].classList.add('selected');
                 }
             }
 
-            this.currentQuality = qualityStr;
-            var playback = (this.currentVideo && this.currentVideo.playback) ? this.currentVideo.playback : null;
-            var stream = (this.currentVideo && this.currentVideo.stream) ? this.currentVideo.stream : null;
+            this.currentQuality = qualityVal;
 
-            if (playback && playback.authorization && playback.streamId) {
+            if (playback && playback.baseUrl && playback.authorization && playback.streamId) {
                 var curTime = this.videoEl ? (this.videoEl.currentTime || 0) : 0;
                 var wasPaused = this.videoEl ? this.videoEl.paused : false;
                 var newUrl = '';
 
-                if (qualityStr === 'Auto') {
+                if (qualityVal === 'Auto') {
                     newUrl = playback.baseUrl + '/' + playback.authorization + '/' + playback.streamId + '/playlist.m3u8';
-                    UI.showToast('Qualidade: Automático (HLS Adaptativo)');
-                } else if (stream && stream.hasMP4Fallback && qualityStr === '720p') {
+                    UI.showToast('Qualidade: ' + (qualityLabel || 'Automático HLS'));
+                } else if (qualityVal === 'mp4_720p') {
                     newUrl = playback.baseUrl + '/' + playback.authorization + '/' + playback.streamId + '/play_720p.mp4';
-                    UI.showToast('Qualidade: MP4 720p fixo');
-                } else {
-                    UI.showToast('Qualidade solicitada: ' + qualityStr + ' (HLS)');
+                    UI.showToast('Qualidade: MP4 720p direto');
                 }
 
                 if (newUrl && this.videoEl.src !== newUrl) {
@@ -913,7 +1003,7 @@
                     }
                 }
             } else {
-                UI.showToast('Qualidade: ' + qualityStr);
+                UI.showToast('Qualidade: ' + (qualityLabel || qualityVal));
             }
 
             Nav.focus(document.getElementById('player-quality-btn'));
@@ -1142,47 +1232,83 @@
             }
         },
 
-        loadHome: function() {
+        isLoadingHome: false,
+        homeSeq: 0,
+        searchSeq: 0,
+        creatorsSeq: 0,
+
+        loadHome: function(isBackground) {
             var self = this;
+            if (this.isLoadingHome) {
+                console.log('Carga da Home já em andamento, ignorando chamada duplicada.');
+                return;
+            }
+            this.isLoadingHome = true;
+            this.homeSeq++;
+            var currentSeq = this.homeSeq;
+
+            var prevFocused = document.activeElement;
 
             // 1. Criadores em Destaque
             Api.getRelevantCreators(1, 15)
                 .then(function(res) {
+                    if (currentSeq !== self.homeSeq) return;
                     self.renderCreatorsCarousel(res.data || [], 'home-creators-carousel');
+                    if (prevFocused && document.contains(prevFocused) && prevFocused.classList.contains('focusable')) {
+                        Nav.focus(prevFocused);
+                    }
                 })
                 .catch(function(err) {
-                    document.getElementById('home-creators-carousel').innerHTML = '<p style="color:#e74c3c;">Erro ao carregar criadores.</p>';
+                    if (currentSeq !== self.homeSeq) return;
+                    var c = document.getElementById('home-creators-carousel');
+                    if (c) c.innerHTML = '<p style="color:#e74c3c;">Erro ao carregar criadores.</p>';
                 });
 
             // 2. Vídeos Gratuitos
             Api.getFreeVideos(1, 10)
                 .then(function(res) {
+                    if (currentSeq !== self.homeSeq) return;
                     self.renderVideosHorizontal(res.data || [], 'home-free-carousel');
                 })
                 .catch(function(err) {
-                    document.getElementById('home-free-carousel').innerHTML = '<p style="color:#a0a0b0;">Nenhum vídeo gratuito no momento.</p>';
+                    if (currentSeq !== self.homeSeq) return;
+                    var f = document.getElementById('home-free-carousel');
+                    if (f) f.innerHTML = '<p style="color:#a0a0b0;">Nenhum vídeo gratuito no momento.</p>';
                 });
 
             // 3. Vídeos Recentes
             Api.getRecentVideos(1, 12)
                 .then(function(res) {
+                    if (currentSeq !== self.homeSeq) return;
                     self.renderVideosGrid(res.data || [], 'home-videos-grid');
+                    self.isLoadingHome = false;
                 })
                 .catch(function(err) {
-                    document.getElementById('home-videos-grid').innerHTML = '<p style="color:#e74c3c;">Erro ao carregar vídeos recentes.</p>';
+                    if (currentSeq !== self.homeSeq) return;
+                    var g = document.getElementById('home-videos-grid');
+                    if (g) g.innerHTML = '<p style="color:#e74c3c;">Erro ao carregar vídeos recentes.</p>';
+                    self.isLoadingHome = false;
                 });
         },
 
-        loadAllCreators: function() {
+        loadAllCreators: function(isBackground) {
             var self = this;
+            this.creatorsSeq++;
+            var currentSeq = this.creatorsSeq;
+
             var container = document.getElementById('all-creators-grid');
-            container.innerHTML = '<div class="spinner"></div>';
+            if (!container) return;
+            if (!isBackground) {
+                container.innerHTML = '<div class="spinner"></div>';
+            }
 
             Api.getRelevantCreators(1, 40)
                 .then(function(res) {
+                    if (currentSeq !== self.creatorsSeq) return;
                     self.renderCreatorsCarousel(res.data || [], 'all-creators-grid');
                 })
                 .catch(function(err) {
+                    if (currentSeq !== self.creatorsSeq) return;
                     container.innerHTML = '<p style="color:#e74c3c;">Falha ao obter catálogo de criadores.</p>';
                 });
         },
@@ -1318,19 +1444,31 @@
         },
 
         performSearch: function(query) {
-            query = query.trim();
+            query = (query || '').trim();
             if (!query) return;
 
-            var container = document.getElementById('search-results-grid');
-            container.innerHTML = '<div class="spinner"></div>';
-
             var self = this;
+            this.searchSeq++;
+            var currentSeq = this.searchSeq;
+
+            var container = document.getElementById('search-results-grid');
+            if (container) {
+                container.innerHTML = '<div class="spinner"></div>';
+            }
+
             Api.searchVideos(query, 1, 24)
                 .then(function(res) {
+                    if (currentSeq !== self.searchSeq) {
+                        console.log('Descartando resposta de busca desatualizada/antiga (seq #' + currentSeq + ')');
+                        return;
+                    }
                     self.renderVideosGrid(res.data || [], 'search-results-grid');
                 })
                 .catch(function(err) {
-                    container.innerHTML = '<p style="color:#e74c3c;">Erro ao realizar busca: ' + err.message + '</p>';
+                    if (currentSeq !== self.searchSeq) return;
+                    if (container) {
+                        container.innerHTML = '<p style="color:#e74c3c;">Erro ao realizar busca: ' + err.message + '</p>';
+                    }
                 });
         },
 
@@ -1358,6 +1496,7 @@
             var user = Storage.getUser();
             var loggedCard = document.getElementById('account-logged-in-card');
             var loginCard = document.getElementById('account-login-card');
+            if (!loggedCard || !loginCard) return;
 
             if (user) {
                 loggedCard.style.display = 'block';
@@ -1541,30 +1680,34 @@
 
         onResume: function() {
             var now = Date.now();
-            var elapsed = now - this.lastActiveTime;
             this.lastActiveTime = now;
+            console.log('Retomando Cinefy do estado adormecido...');
 
-            // Se o player estiver ativo (reproduzindo vídeo), NUNCA interromper a reprodução!
+            // 1. Revalidar sessão com o servidor em segundo plano
+            UI.checkSession();
+
+            // 2. Se o player estiver ativo (reproduzindo vídeo), NUNCA interromper a reprodução!
             if (Player.isActive) {
-                console.log('Retomando com player ativo; reprodução preservada.');
+                console.log('Retomando com player ativo: reprodução e tela preservadas.');
                 return;
             }
 
-            // Se a tela atual for busca com resultados, NUNCA descartar a busca do usuário
+            // 3. Se a tela atual for busca:
+            // PRESERVAR termos digitados, resultados e foco atual!
             if (UI.currentView === 'search') {
-                console.log('Retomando na tela de busca; termos e resultados preservados.');
+                console.log('Retomando na tela de busca: termos, resultados e foco preservados.');
+                // Invalidar requisições pendentes anteriores para descartar respostas defasadas
+                UI.searchSeq++;
                 return;
             }
 
-            // Se passaram mais de 10 minutos desde a última atividade, revalidar sessão e atualizar catálogo
-            if (elapsed > this.REFRESH_INTERVAL) {
-                console.log('Retomado após ' + Math.round(elapsed / 1000) + 's de inatividade. Revalidando sessão...');
-                UI.checkSession();
-                if (UI.currentView === 'home') {
-                    UI.loadHome();
-                } else if (UI.currentView === 'creators') {
-                    UI.loadAllCreators();
-                }
+            // 4. Se estiver em Home ou Criadores, revalidar dados sem chamadas duplicadas
+            if (UI.currentView === 'home') {
+                UI.loadHome(true);
+            } else if (UI.currentView === 'creators') {
+                UI.loadAllCreators(true);
+            } else if (UI.currentView === 'channel-detail' && UI.selectedChannel) {
+                UI.loadChannelVideos(UI.selectedChannel.id, 'recent');
             }
         }
     };
@@ -1579,5 +1722,26 @@
         UI.init();
         Lifecycle.init();
     });
+
+    // ==========================================
+    // 10. EXPOSIÇÃO DE MÓDULOS (Compatibilidade e Testes)
+    // ==========================================
+    var Cinefy = {
+        CONFIG: CONFIG,
+        Storage: Storage,
+        Api: Api,
+        Nav: Nav,
+        Player: Player,
+        Keyboard: Keyboard,
+        UI: UI,
+        Lifecycle: Lifecycle
+    };
+
+    if (typeof window !== 'undefined') {
+        window.Cinefy = Cinefy;
+    }
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = Cinefy;
+    }
 
 })();
