@@ -353,6 +353,20 @@ assert(capturedLoginOptions.body && capturedLoginOptions.body.session && capture
 assert(capturedLoginOptions.body.session.platform !== 'Tizen SmartTV',
     'Api.login() não envia valores rejeitados pelo backend como "Tizen SmartTV"');
 
+// Teste 1.6: Api.getMe() envia parâmetros de sessão para atender validação do backend
+let capturedMeUrl = null;
+let capturedMeOptions = null;
+Api.request = function(endpoint, options) {
+    capturedMeUrl = endpoint;
+    capturedMeOptions = options;
+    return Promise.resolve({ data: { id: 'usr_1', email: 'teste@exemplo.com' } });
+};
+
+Api.getMe();
+assert(capturedMeUrl.indexOf('/v2/auth/@me?') === 0, 'Api.getMe() chama endpoint /v2/auth/@me com query parameters');
+assert(capturedMeUrl.indexOf('platform=web') !== -1, 'Api.getMe() passa platform=web na query string');
+assert(capturedMeOptions && capturedMeOptions._skipAuthClear === true, 'Api.getMe() define _skipAuthClear=true para proteger sessão');
+
 Api.request = originalApiRequest;
 
 

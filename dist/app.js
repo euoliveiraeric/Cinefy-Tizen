@@ -10,7 +10,7 @@
     // 1. CONFIGURAÇÕES & CONSTANTES
     // ==========================================
     var CONFIG = {
-        VERSION: '1.1.2',
+        VERSION: '1.1.3',
         API_URL: 'https://api.cinefy.gg',
         PUBLIC_CDN: 'https://cdn.cinefy.gg',
         VIDEOS_CDN: 'https://videos.cinefy.gg',
@@ -142,7 +142,7 @@
                         resolve(data);
                     } else if (xhr.status === 401) {
                         // Sessão expirada ou token revogado
-                        if (token) {
+                        if (token && !options._skipAuthClear) {
                             console.log('Sessão expirada detectada (HTTP 401). Limpando autenticação.');
                             Storage.clearAuth();
                             if (typeof UI !== 'undefined' && UI.updateAccountView) {
@@ -251,7 +251,16 @@
         },
 
         getMe: function() {
-            return this.request('/v2/auth/@me');
+            var params = [
+                'platform=web',
+                'platformLang=pt-BR',
+                'platformTimeZone=America%2FSao_Paulo',
+                'screenWidth=1920',
+                'screenHeight=1080'
+            ].join('&');
+            return this.request('/v2/auth/@me?' + params, {
+                _skipAuthClear: true
+            });
         },
 
         buildMediaUrl: function(folder, filename, width) {
@@ -1481,14 +1490,19 @@
 
             var self = this;
             Api.getMe()
-                .then(function(user) {
-                    Storage.setUser(user);
+                .then(function(res) {
+                    var profile = (res && res.data) ? res.data : res;
+                    if (profile && (profile.id || profile.username || profile.email)) {
+                        Storage.setUser(profile);
+                    }
                     self.updateAccountView();
                 })
                 .catch(function(err) {
-                    console.log('Sessão expirada ou inválida:', err);
-                    Storage.clearAuth();
-                    self.updateAccountView();
+                    console.log('Falha ao revalidar sessão @me:', err);
+                    if (err && err.status === 401) {
+                        Storage.clearAuth();
+                        self.updateAccountView();
+                    }
                 });
         },
 
@@ -1545,13 +1559,29 @@
 
                     if (token) {
                         Storage.setToken(token);
+                        // Define usuário imediato para liberar a interface e manter a sessão ativa
+                        var userHandle = (email.indexOf('@') !== -1) ? email.split('@')[0] : email;
+                        var initialUser = {
+                            email: email,
+                            username: userHandle,
+                            displayName: userHandle
+                        };
+                        Storage.setUser(initialUser);
+                        self.updateAccountView();
                         UI.showToast('Login realizado com sucesso!', 'success');
 
-                        // Obter perfil completo
-                        return Api.getMe().then(function(userData) {
-                            Storage.setUser(userData);
-                            self.updateAccountView();
-                        });
+                        // Obter perfil completo em segundo plano sem quebrar a sessão se falhar
+                        Api.getMe()
+                            .then(function(profileRes) {
+                                var profile = (profileRes && profileRes.data) ? profileRes.data : profileRes;
+                                if (profile && (profile.id || profile.username || profile.email)) {
+                                    Storage.setUser(profile);
+                                    self.updateAccountView();
+                                }
+                            })
+                            .catch(function(getMeErr) {
+                                console.warn('Aviso: Perfil complementar não carregado, mantendo sessão ativa:', getMeErr);
+                            });
                     } else if (res && res.type === 'otp') {
                         self.showModal('Autenticação em 2 Etapas', 'Sua conta requer código de autenticação 2FA. Por favor, acesse o Cinefy pelo navegador para concluir o primeiro login.');
                     } else {
@@ -1562,11 +1592,23 @@
                     console.error('Falha no login:', err);
                     var msg = 'E-mail ou senha incorretos.';
                     if (err && err.data) {
-                        if (err.data.message) {
+                        if (err.data.fields) {
+                            var fields = err.data.fields;
+                            if (fields.email && fields.email._errors && fields.email._errors[0]) {
+                                msg = fields.email._errors[0].message || msg;
+                            } else if (fields.password && fields.password._errors && fields.password._errors[0]) {
+                                msg = fields.password._errors[0].message || msg;
+                            } else if (fields['session.platform'] && fields['session.platform']._errors && fields['session.platform']._errors[0]) {
+                                msg = fields['session.platform']._errors[0].message || msg;
+                            }
+                        } else if (err.data.message) {
                             msg = err.data.message;
                         } else if (err.data.error) {
                             msg = err.data.error;
                         }
+                    }
+                    if (msg === 'Validation error' || msg === 'Invalid login or password') {
+                        msg = 'E-mail ou senha incorretos. Verifique suas credenciais no Cinefy.';
                     }
                     self.showModal('Falha na Autenticação', msg);
                 });
