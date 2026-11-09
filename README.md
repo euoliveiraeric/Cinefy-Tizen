@@ -44,8 +44,8 @@ A versão web do `https://cinefy.gg` utiliza Next.js (App Router) compilado via 
 ### 1.4 Estratégia de Cache e Atualização do Módulo
 - Para evitar que o Chromium 47 retenha arquivos em cache local desatualizados após atualizações no TizenBrew:
   - Tags `<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">` e `<meta http-equiv="Pragma" content="no-cache">` foram incluídas no `dist/index.html`.
-  - Os recursos estáticos utilizam versionamento por parâmetro de URL (`app.css?v=1.1.0` e `app.js?v=1.1.0`).
-  - O rodapé do aplicativo exibe visualmente a versão ativa (`Cinefy TV v1.3.0 (Tizen 3.0 Edition)`) para confirmação direta na tela da TV.
+  - Os recursos estáticos utilizam versionamento por parâmetro de URL (`app.css?v=1.3.1` e `app.js?v=1.3.1`).
+  - O rodapé do aplicativo exibe visualmente a versão ativa (`Cinefy TV v1.3.1 (Tizen 3.0 Edition)`) para confirmação direta na tela da TV.
 
 ---
 
@@ -61,7 +61,8 @@ A versão web do `https://cinefy.gg` utiliza Next.js (App Router) compilado via 
 | :--- | :---: | :--- |
 | **Sintaxe JavaScript ES5 Estrita** | Implementado | Testado no Computador (100% aprovado via AST Acorn `ecmaVersion: 5`) |
 | **CSS compatível com Chromium 47** | Implementado | Testado no Computador (sem CSS Variables, sem flex gap) |
-| **Execução do Código Real nos Testes** | Implementado | Testado via `test_suite.js` (executa `dist/app.js` real - 51 testes aprovados) |
+| **Execução do Código Real nos Testes** | Implementado | Testado via `test_suite.js` (executa `dist/app.js` real - 67 testes aprovados) |
+| **Barra Lateral Oculta (Drawer) & D-Pad** | Implementado | Testado via `test_suite.js` (sidebar recolhida offscreen, sem cortes de cards e sem saltos) |
 | **Scrub na Linha do Tempo c/ Aceleração** | Implementado | Testado via D-Pad (10s -> 30s -> 60s -> 120s debounced) |
 | **Retomada de Reprodução (Watch Progress)** | Implementado | Testado no Storage local e sincronização com API Cinefy |
 | **Preservação de Foco no Retorno** | Implementado | Testado no Computador (foco mantido no card do episódio ao fechar player) |
@@ -73,7 +74,7 @@ A versão web do `https://cinefy.gg` utiliza Next.js (App Router) compilado via 
 | **Sem Redução Silenciosa de Qualidade** | Implementado | Testado no Computador (modal de escolha acionado quando HLS falha) |
 | **Ciclo de Vida (Dormência & Retomada)** | Implementado | Testado no Computador (revalida dados sem duplicidade; preserva busca e player) |
 | **Concorrência e Descarte de Respostas**| Implementado | Testado no Computador (respostas antigas de busca são descartadas por sequência) |
-| **Identificação Visual de Versão (v1.1.0)**| Implementado | Testado no Computador (exibição no HTML e cabeçalhos anti-cache) |
+| **Identificação Visual de Versão (v1.3.1)**| Implementado | Testado no Computador (exibição no HTML e cabeçalhos anti-cache) |
 | **Reprodução Real na TV UN55MU7500** | **Pendente** | **Ainda NÃO testado na TV real** |
 | **Desempenho de Vídeo 1080p na TV** | **Pendente** | Requer medição física na TV Samsung |
 
@@ -83,7 +84,7 @@ A versão web do `https://cinefy.gg` utiliza Next.js (App Router) compilado via 
 
 ```text
 Cinefy-Tizen/
-├── package.json             <-- Manifesto oficial do módulo TizenBrew v1.1.0 (packageType: "app")
+├── package.json             <-- Manifesto oficial do módulo TizenBrew v1.3.1 (packageType: "app")
 ├── README.md                <-- Documentação técnica, status e instruções
 ├── verify_es5.js            <-- Análise sintática AST ECMAScript 5 real via Acorn
 ├── verify_es5.py            <-- Wrapper Python para execução do analisador AST
@@ -91,7 +92,7 @@ Cinefy-Tizen/
 ├── test_api_endpoints.py    <-- Testes de conectividade com a API REST do Cinefy
 ├── test_local_server.py     <-- Servidor HTTP local para validação de entrega de pacotes
 └── dist/
-    ├── index.html           <-- Interface TV 1080p com cabeçalhos anti-cache e versão 1.1.0
+    ├── index.html           <-- Interface TV 1080p com cabeçalhos anti-cache e versão 1.3.1
     ├── app.css              <-- Estilos sem recursos incompatíveis com Chromium 47
     ├── app.js               <-- Código JavaScript ES5 validado via AST (módulos exportados)
     └── assets/
@@ -117,4 +118,4 @@ Cinefy-Tizen/
 4. Digite: `srwayne15-bot/Cinefy-Tizen@main`.
 5. Confirme. O TizenBrew baixará o pacote e adicionará o **Cinefy** à lista.
 6. Ao abrir o Cinefy na TV, confira no canto inferior esquerdo se consta:
-   `Cinefy TV v1.3.0 (Tizen 3.0 Edition)`.
+   `Cinefy TV v1.3.1 (Tizen 3.0 Edition)`.

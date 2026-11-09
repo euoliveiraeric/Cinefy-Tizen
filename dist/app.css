@@ -30,9 +30,12 @@ body, html {
     background: radial-gradient(circle at 10% 20%, #171720 0%, #0d0d11 90%);
 }
 
-/* Sidebar Navigation */
+/* Sidebar Navigation (Overlay Drawer for TV) */
 #sidebar {
-    width: 260px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 300px;
     height: 1080px;
     background-color: #121218;
     border-right: 2px solid #23232e;
@@ -41,9 +44,38 @@ body, html {
     -webkit-flex-direction: column;
     flex-direction: column;
     padding: 30px 20px;
-    z-index: 50;
-    -webkit-flex-shrink: 0;
-    flex-shrink: 0;
+    z-index: 100;
+    -webkit-transform: translateX(-100%);
+    transform: translateX(-100%);
+    -webkit-transition: -webkit-transform 0.25s ease-out, box-shadow 0.25s ease-out;
+    transition: transform 0.25s ease-out, box-shadow 0.25s ease-out;
+    box-shadow: none;
+}
+
+#sidebar.open {
+    -webkit-transform: translateX(0);
+    transform: translateX(0);
+    box-shadow: 15px 0 60px rgba(0, 0, 0, 0.95);
+}
+
+/* Sidebar Backdrop */
+#sidebar-backdrop {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 1920px;
+    height: 1080px;
+    background-color: rgba(0, 0, 0, 0.65);
+    z-index: 90;
+    opacity: 0;
+    -webkit-transition: opacity 0.25s ease-out;
+    transition: opacity 0.25s ease-out;
+}
+
+#sidebar-backdrop.active {
+    display: block;
+    opacity: 1;
 }
 
 .logo-container {
@@ -154,14 +186,13 @@ body, html {
     text-align: center;
 }
 
-/* Main Content Area */
+/* Main Content Area (Full 1920px TV width) */
 #main-content {
-    -webkit-flex: 1;
-    flex: 1;
+    width: 1920px;
     height: 1080px;
     overflow-y: hidden;
     position: relative;
-    padding: 40px 50px;
+    padding: 40px 70px;
 }
 
 .view-section {
@@ -231,8 +262,8 @@ body, html {
     display: flex;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 15px 10px;
-    margin: 0 -10px 30px -10px;
+    padding: 22px 14px;
+    margin: 0 -14px 28px -14px;
     scrollbar-width: none;
 }
 
@@ -293,6 +324,19 @@ body, html {
     color: #9090a8;
 }
 
+/* Creators Grid (All Creators) */
+.creators-grid {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-wrap: wrap;
+    flex-wrap: wrap;
+    padding: 10px 0;
+}
+
+.creators-grid .creator-card {
+    margin-bottom: 24px;
+}
+
 /* Video Grid */
 .video-grid {
     display: -webkit-flex;
@@ -300,11 +344,12 @@ body, html {
     -webkit-flex-wrap: wrap;
     flex-wrap: wrap;
     margin-right: -24px;
+    padding: 10px 0;
 }
 
 .video-card {
-    width: 360px;
-    height: 310px;
+    width: 380px;
+    height: 320px;
     background-color: #171722;
     border-radius: 14px;
     margin-right: 24px;
@@ -327,7 +372,7 @@ body, html {
 
 .video-thumb-wrap {
     width: 100%;
-    height: 195px;
+    height: 205px;
     position: relative;
     background-color: #0e0e14;
     overflow: hidden;

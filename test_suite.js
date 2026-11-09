@@ -60,6 +60,7 @@ function createMockElement(tagName, id, className) {
         parentNode: null,
         appendChild: function(child) {
             child.parentNode = this;
+            child.parentElement = this;
             this.children.push(child);
             return child;
         },
@@ -186,6 +187,7 @@ const domElements = {
     'view-search': createMockElement('div', 'view-search', 'view-section'),
     'view-account': createMockElement('div', 'view-account', 'view-section'),
     'home-creators-carousel': createMockElement('div', 'home-creators-carousel'),
+    'home-trending-carousel': createMockElement('div', 'home-trending-carousel'),
     'home-free-carousel': createMockElement('div', 'home-free-carousel'),
     'home-videos-grid': createMockElement('div', 'home-videos-grid'),
     'all-creators-grid': createMockElement('div', 'all-creators-grid'),
@@ -202,8 +204,22 @@ const domElements = {
     'account-logout-btn': createMockElement('button', 'account-logout-btn', 'focusable'),
     'login-email': createMockElement('input', 'login-email', 'focusable'),
     'login-password': createMockElement('input', 'login-password', 'focusable'),
-    'app-version-badge': createMockElement('div', 'app-version-badge')
+    'app-version-badge': createMockElement('div', 'app-version-badge'),
+    'sidebar': createMockElement('div', 'sidebar'),
+    'sidebar-backdrop': createMockElement('div', 'sidebar-backdrop'),
+    'nav-home': createMockElement('button', 'nav-home', 'nav-item focusable active'),
+    'nav-creators': createMockElement('button', 'nav-creators', 'nav-item focusable'),
+    'nav-search': createMockElement('button', 'nav-search', 'nav-item focusable'),
+    'nav-account': createMockElement('button', 'nav-account', 'nav-item focusable'),
+    'nav-reload': createMockElement('button', 'nav-reload', 'nav-item focusable')
 };
+
+// Configurar hierarquia de nós da sidebar
+domElements['sidebar'].appendChild(domElements['nav-home']);
+domElements['sidebar'].appendChild(domElements['nav-creators']);
+domElements['sidebar'].appendChild(domElements['nav-search']);
+domElements['sidebar'].appendChild(domElements['nav-account']);
+domElements['sidebar'].appendChild(domElements['nav-reload']);
 
 let activeFocusedElement = null;
 
@@ -216,13 +232,16 @@ const documentMock = {
     },
     querySelector: function(sel) {
         if (sel === '.view-section.active') return domElements['view-home'];
+        if (sel === '.nav-item.active') return domElements['nav-home'];
         if (sel === '#virtual-keyboard .key-btn') return createMockElement('button', 'key-a', 'key-btn focusable');
         if (sel.startsWith('#')) return domElements[sel.slice(1)] || null;
         return null;
     },
     querySelectorAll: function(sel) {
         if (sel === '.view-section') return [domElements['view-home'], domElements['view-creators'], domElements['view-search'], domElements['view-account']];
-        if (sel === '.nav-item') return [];
+        if (sel === '.nav-item' || sel === '#sidebar .nav-item') {
+            return [domElements['nav-home'], domElements['nav-creators'], domElements['nav-search'], domElements['nav-account'], domElements['nav-reload']];
+        }
         if (sel === '.quality-option') return domElements['quality-options-list'].querySelectorAll('.quality-option');
         return [];
     },
@@ -376,12 +395,23 @@ assert(capturedMeOptions && capturedMeOptions._skipAuthClear === true, 'Api.getM
 
 Api.request = originalApiRequest;
 
-// Teste 1.7: Construção exata de URLs de thumbnail de vídeo (sem 404)
+// Teste 1.7: Endpoint de vídeos em alta (Trending)
+let capturedTrendingUrl = '';
+Api.request = function(url) {
+    capturedTrendingUrl = url;
+    return Promise.resolve({ data: [] });
+};
+Api.getTrendingVideos(1, 15);
+assert(capturedTrendingUrl.indexOf('/v1/videos/trending?origin=home-page') !== -1,
+    'Api.getTrendingVideos() consulta endpoint oficial de trending com query parameters');
+Api.request = originalApiRequest;
+
+// Teste 1.8: Construção exata de URLs de thumbnail de vídeo (sem 404)
 const sampleThumbUrl = Api.buildThumbnailUrl('u83a9On7DkaQw', '097c1643-32db-4c5b-b29c-e7fd67522036.png', 600);
 assert(sampleThumbUrl === 'https://cdn.cinefy.gg/videos/u83a9On7DkaQw/thumbnail/097c1643-32db-4c5b-b29c-e7fd67522036.png?width=600',
     'Api.buildThumbnailUrl() constrói caminho oficial Cinefy (/videos/:id/thumbnail/:file) para evitar erro 404');
 
-// Teste 1.8: UI.exitApp executa encerramento multi-tier sem quebrar
+// Teste 1.9: UI.exitApp executa encerramento multi-tier sem quebrar
 let exitInvoked = false;
 windowMock.tizen = {
     application: {
@@ -489,6 +519,36 @@ assert(modalTitle.indexOf('Falha no Stream') !== -1,
     'handlePlaybackError() exibe aviso de falha e opções honestas ao usuário');
 assert(modalActionCalled === true && videoMock.src.indexOf('play_720p.mp4') !== -1,
     'Alternância para MP4 720p ocorre somente mediante escolha/confirmação explícita');
+
+// Teste 2.8: handleAccessRequired() para usuário logado não diz "faça login na aba Minha Conta"
+Storage.setToken('valid_user_token_123');
+let accessModalMsg = '';
+UI.showModal = function(title, msg) { accessModalMsg = msg; };
+Player.handleAccessRequired({ type: 'free' });
+assert(accessModalMsg.indexOf('faça login') === -1,
+    'handleAccessRequired() para usuário logado NÃO diz "faça login na aba Minha Conta"');
+assert(accessModalMsg.indexOf('não retornaram autorização') !== -1,
+    'handleAccessRequired() para usuário logado informa ausência de autorização da CDN');
+
+// Teste 2.9: handleAccessRequired() para usuário deslogado orienta conexão de conta
+Storage.clearAuth();
+Player.handleAccessRequired({ type: 'free' });
+assert(accessModalMsg.indexOf('login') !== -1 || accessModalMsg.indexOf('conecte') !== -1,
+    'handleAccessRequired() para usuário deslogado orienta conexão de conta na aba Minha Conta');
+
+// Teste 2.10: Rejeição com HTTP 404 em Api.getVideo() exibe "Vídeo Indisponível" sem solicitar login
+const originalGetVideo = Api.getVideo;
+let captured404Title = '';
+UI.showModal = function(title, msg) {
+    captured404Title = title;
+};
+Api.getVideo = function() {
+    const err = new Error('Video não encontrado');
+    err.status = 404;
+    return Promise.reject(err);
+};
+Storage.setToken('sample_token');
+Player.open({ id: 'video_404', title: 'Video 404', type: 'free' });
 
 
 // ========================================================
@@ -673,6 +733,57 @@ setTimeout(() => {
             'applyPendingResume() posiciona currentTime no ponto exato onde o usuário parou');
 
         Player.close();
+
+        // Testes do Menu Lateral Oculto (Drawer) & Navegação D-Pad
+        assert(UI.isSidebarOpen() === false,
+            'Barra lateral inicia recolhida/oculta (isSidebarOpen === false)');
+
+        UI.openSidebar();
+        assert(UI.isSidebarOpen() === true,
+            'UI.openSidebar() abre a barra lateral e define classe open');
+        assert(domElements['sidebar-backdrop'].classList.contains('active'),
+            'UI.openSidebar() ativa o backdrop do menu lateral');
+
+        UI.closeSidebar();
+        assert(UI.isSidebarOpen() === false,
+            'UI.closeSidebar() fecha a barra lateral');
+        assert(!domElements['sidebar-backdrop'].classList.contains('active'),
+            'UI.closeSidebar() desativa o backdrop');
+
+        // Teste de exclusão espacial da sidebar fechada
+        assert(Nav.isInHiddenContainer(domElements['nav-home']) === true,
+            'Nav.isInHiddenContainer() exclui itens da sidebar de candidatos espaciais quando fechada');
+
+        UI.openSidebar();
+        assert(Nav.isInHiddenContainer(domElements['nav-home']) === false,
+            'Nav.isInHiddenContainer() permite itens da sidebar como candidatos quando aberta');
+        UI.closeSidebar();
+
+        // Teste de fechamento da sidebar via tecla Voltar (Back)
+        UI.openSidebar();
+        Nav.focus(domElements['nav-home']);
+        Nav.handleBack();
+        assert(UI.isSidebarOpen() === false,
+            'Pressionar Voltar com menu aberto fecha a barra lateral sem sair do app');
+
+        // Teste de navegação Direita para fechar menu e restaurar conteúdo
+        const mockContentCard = createMockElement('div', 'mock-card-content', 'video-card focusable');
+        domElements['home-trending-carousel'].appendChild(mockContentCard);
+        Nav.focus(mockContentCard);
+        assert(UI.lastContentFocus === mockContentCard,
+            'Focar elemento de conteúdo salva UI.lastContentFocus');
+
+        // Abrir menu e focar nav-home
+        Nav.focus(domElements['nav-home']);
+        assert(UI.isSidebarOpen() === true,
+            'Focar item de menu (nav-item) abre a barra lateral automaticamente');
+
+        // Pressionar Direita
+        Nav.moveFocus('right');
+        assert(UI.isSidebarOpen() === false,
+            'Pressionar Direita no menu fecha a barra lateral');
+        assert(Nav.currentFocus === mockContentCard,
+            'Pressionar Direita no menu restaura o foco no card de conteúdo anterior');
 
         // ========================================================
         // BLOCO 6: DIFERENCIAÇÃO FORMAL DOS NÍVEIS DE TESTE

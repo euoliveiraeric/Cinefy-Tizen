@@ -10,7 +10,7 @@
     // 1. CONFIGURAÇÕES & CONSTANTES
     // ==========================================
     var CONFIG = {
-        VERSION: '1.3.0',
+        VERSION: '1.3.1',
         API_URL: 'https://api.cinefy.gg',
         PUBLIC_CDN: 'https://cdn.cinefy.gg',
         VIDEOS_CDN: 'https://videos.cinefy.gg',
@@ -265,6 +265,12 @@
             return this.request('/v1/videos?page=' + page + '&perPage=' + perPage + '&sortedOrder=desc');
         },
 
+        getTrendingVideos: function(page, perPage) {
+            page = page || 1;
+            perPage = perPage || 20;
+            return this.request('/v1/videos/trending?origin=home-page&page=' + page + '&perPage=' + perPage);
+        },
+
         getFreeVideos: function(page, perPage) {
             page = page || 1;
             perPage = perPage || 20;
@@ -379,9 +385,10 @@
                 self.handleKeyDown(e);
             });
 
-            // Focar o primeiro item navegável na inicialização
+            // Focar o primeiro item do conteúdo quando carregado (a barra lateral inicia recolhida)
             setTimeout(function() {
-                var first = document.getElementById('nav-home');
+                var activeView = document.querySelector('.view-section.active');
+                var first = activeView ? activeView.querySelector('.focusable:not([disabled])') : null;
                 if (first) self.focus(first);
             }, 300);
         },
@@ -396,6 +403,18 @@
             try {
                 el.focus();
             } catch (e) {}
+
+            // Gerenciar estado da barra lateral conforme elemento em foco
+            if (el.classList.contains('nav-item')) {
+                if (!UI.isSidebarOpen()) {
+                    UI.openSidebar();
+                }
+            } else {
+                UI.lastContentFocus = el;
+                if (UI.isSidebarOpen()) {
+                    UI.closeSidebar();
+                }
+            }
 
             // Rolagem automática para manter elemento visível na TV
             this.scrollIntoViewIfNeeded(el);
@@ -416,12 +435,13 @@
                         parent.scrollTop -= (pRect.top - elRect.top + 60);
                     }
 
-                    // Scroll horizontal
-                    if (elRect.right > pRect.right - 40) {
-                        parent.scrollLeft += (elRect.right - pRect.right + 60);
-                    } else if (elRect.left < pRect.left + 40) {
-                        parent.scrollLeft -= (pRect.left - elRect.left + 60);
+                    // Scroll horizontal com margem de segurança
+                    if (elRect.right > pRect.right - 50) {
+                        parent.scrollLeft += (elRect.right - pRect.right + 80);
+                    } else if (elRect.left < pRect.left + 50) {
+                        parent.scrollLeft -= (pRect.left - elRect.left + 80);
                     }
+                    if (parent.scrollLeft < 0) parent.scrollLeft = 0;
                 }
                 parent = parent.parentElement;
             }
@@ -486,9 +506,15 @@
 
         moveFocus: function(direction) {
             var current = this.currentFocus;
-            if (!current) {
-                var first = document.querySelector('.focusable:not([disabled])');
-                if (first) this.focus(first);
+
+            // Se o elemento em foco foi destruído ou removido do DOM
+            if (!current || !document.contains(current)) {
+                var activeView = document.querySelector('.view-section.active');
+                var fallbackEl = activeView ? activeView.querySelector('.focusable:not([disabled])') : null;
+                if (!fallbackEl && UI.isSidebarOpen()) {
+                    fallbackEl = document.querySelector('.nav-item.active') || document.getElementById('nav-home');
+                }
+                if (fallbackEl) this.focus(fallbackEl);
                 return;
             }
 
@@ -511,25 +537,33 @@
                     return;
                 }
                 if (direction === 'right') {
-                    // Pular para o primeiro elemento focável da tela ativa
-                    var activeView = document.querySelector('.view-section.active');
-                    if (activeView) {
-                        var firstContent = activeView.querySelector('.focusable:not([disabled])');
+                    // Pressionar Direita na barra lateral fecha a aba e volta ao conteúdo
+                    UI.closeSidebar();
+                    var restoreEl = UI.lastContentFocus;
+                    if (restoreEl && document.contains(restoreEl) && !restoreEl.classList.contains('nav-item')) {
+                        this.focus(restoreEl);
+                        return;
+                    }
+                    var activeViewContent = document.querySelector('.view-section.active');
+                    if (activeViewContent) {
+                        var firstContent = activeViewContent.querySelector('.focusable:not([disabled])');
                         if (firstContent) {
                             this.focus(firstContent);
                             return;
                         }
                     }
+                    return;
                 }
                 if (direction === 'left') {
-                    // Limite esquerdo da interface atingido, permanece no menu
+                    // Limite esquerdo da barra lateral atingido, permanece nela
                     return;
                 }
             }
 
             // 2. Navegação em carrossel horizontal (.horizontal-carousel)
             var carousel = current.parentElement;
-            if (carousel && carousel.classList && carousel.classList.contains('horizontal-carousel')) {
+            var isTrueCarousel = carousel && carousel.classList && carousel.classList.contains('horizontal-carousel') && (!carousel.style || carousel.style.flexWrap !== 'wrap');
+            if (isTrueCarousel) {
                 if (direction === 'right') {
                     var nextCard = current.nextElementSibling;
                     while (nextCard && (!nextCard.classList || !nextCard.classList.contains('focusable'))) {
@@ -549,7 +583,8 @@
                         this.focus(prevCard);
                         return;
                     } else {
-                        // Se estiver no primeiro cartão do carrossel, voltar para a barra lateral
+                        // Se estiver no primeiro cartão do carrossel (não há mais nada à esquerda), abrir a barra lateral!
+                        UI.openSidebar();
                         var activeNav = document.querySelector('.nav-item.active') || document.getElementById('nav-home');
                         if (activeNav) {
                             this.focus(activeNav);
@@ -565,6 +600,10 @@
             for (var i = 0; i < elements.length; i++) {
                 var el = elements[i];
                 if (el.offsetParent !== null && !this.isInHiddenContainer(el)) {
+                    // Se a barra lateral estiver fechada, nav-items NUNCA entram como candidatos espaciais!
+                    if (!UI.isSidebarOpen() && el.classList.contains('nav-item')) {
+                        continue;
+                    }
                     visibleElements.push(el);
                 }
             }
@@ -573,7 +612,8 @@
             if (next) {
                 this.focus(next);
             } else if (direction === 'left' && !current.classList.contains('nav-item')) {
-                // Se navegar para esquerda e não houver mais itens na tela, pular para o menu lateral
+                // Se navegar para esquerda e não houver mais nenhum elemento à esquerda, abrir a barra lateral!
+                UI.openSidebar();
                 var sideNav = document.querySelector('.nav-item.active') || document.getElementById('nav-home');
                 if (sideNav) {
                     this.focus(sideNav);
@@ -590,7 +630,10 @@
                 if (p.classList && p.classList.contains('view-section') && !p.classList.contains('active')) {
                     return true;
                 }
-                p = p.parentElement;
+                if (p.id === 'sidebar' && !UI.isSidebarOpen()) {
+                    return true;
+                }
+                p = p.parentElement || p.parentNode;
             }
             return false;
         },
@@ -675,6 +718,22 @@
         },
 
         handleBack: function() {
+            // Se a barra lateral estiver aberta, apenas fechá-la e voltar para o conteúdo
+            if (UI.isSidebarOpen()) {
+                UI.closeSidebar();
+                var restoreEl = UI.lastContentFocus;
+                if (restoreEl && document.contains(restoreEl) && !restoreEl.classList.contains('nav-item')) {
+                    this.focus(restoreEl);
+                } else {
+                    var activeView = document.querySelector('.view-section.active');
+                    if (activeView) {
+                        var firstContent = activeView.querySelector('.focusable:not([disabled])');
+                        if (firstContent) this.focus(firstContent);
+                    }
+                }
+                return;
+            }
+
             // Se estiver em detalhe do canal, voltar para a lista de canais ou home
             var channelDetail = document.getElementById('view-channel-detail');
             if (channelDetail && channelDetail.classList.contains('active')) {
@@ -686,14 +745,6 @@
             var homeView = document.getElementById('view-home');
             if (homeView && !homeView.classList.contains('active')) {
                 UI.showView('home');
-                return;
-            }
-
-            // Se estiver na Home e o foco não for o menu lateral, focar menu lateral
-            var current = this.currentFocus;
-            if (current && !current.classList.contains('nav-item')) {
-                var homeNav = document.getElementById('nav-home');
-                if (homeNav) this.focus(homeNav);
                 return;
             }
 
@@ -895,12 +946,23 @@
                     }
 
                     if (err.status === 401 || err.status === 403) {
+                        var isLoggedIn = !!Storage.getToken();
+                        var modalMsg = isLoggedIn
+                            ? 'Este vídeo é restrito a assinantes deste canal no Cinefy. Sua conta conectada não possui assinatura ativa para este criador.'
+                            : 'Este vídeo exige login ou assinatura ativa do canal no Cinefy. Deseja acessar sua conta agora?';
                         UI.showModal(
                             'Conteúdo Restrito',
-                            'Este vídeo exige login ou assinatura ativa do canal no Cinefy. Deseja acessar sua conta agora?',
+                            modalMsg,
                             function() {
-                                UI.showView('account');
+                                if (!isLoggedIn) {
+                                    UI.showView('account');
+                                }
                             }
+                        );
+                    } else if (err.status === 404) {
+                        UI.showModal(
+                            'Vídeo Indisponível',
+                            'Este vídeo não foi encontrado ou não está disponível nos servidores do Cinefy.'
                         );
                     } else {
                         self.handleAccessRequired(videoData, err);
@@ -909,13 +971,26 @@
         },
 
         handleAccessRequired: function(videoData, err) {
-            var isFree = (videoData.type === 'free');
-            var msg = isFree
-                ? 'Os servidores BunnyCDN do Cinefy exigem token assinado de sessão para autorizar o streaming deste vídeo. Por favor, faça login na sua conta Cinefy na aba "Minha Conta".'
-                : 'Este vídeo VOD é restrito a assinantes do canal. Acesse "Minha Conta" para conectar sua conta Cinefy.';
+            var isFree = (videoData && videoData.type === 'free');
+            var isLoggedIn = !!Storage.getToken();
+            var msg = '';
+
+            if (isLoggedIn) {
+                if (isFree) {
+                    msg = 'Os servidores BunnyCDN do Cinefy não retornaram autorização de streaming para este vídeo. O conteúdo pode estar temporariamente indisponível ou ter sido descontinuado na plataforma.';
+                } else {
+                    msg = 'Este vídeo VOD é restrito a assinantes deste canal. Sua conta conectada não possui assinatura ativa para este criador no Cinefy.';
+                }
+            } else {
+                if (isFree) {
+                    msg = 'Os servidores BunnyCDN do Cinefy exigem token assinado de sessão para autorizar o streaming deste vídeo. Por favor, conecte sua conta Cinefy na aba "Minha Conta".';
+                } else {
+                    msg = 'Este vídeo VOD é restrito a assinantes do canal. Acesse "Minha Conta" para conectar sua conta Cinefy.';
+                }
+            }
 
             UI.showModal('Aviso de Streaming Cinefy', msg, function() {
-                if (!Storage.getToken()) {
+                if (!isLoggedIn) {
                     UI.showView('account');
                 }
             });
@@ -1528,9 +1603,37 @@
     var UI = {
         currentView: 'home',
         selectedChannel: null,
+        lastContentFocus: null,
+
+        isSidebarOpen: function() {
+            var sidebar = document.getElementById('sidebar');
+            return sidebar ? sidebar.classList.contains('open') : false;
+        },
+
+        openSidebar: function() {
+            var sidebar = document.getElementById('sidebar');
+            var backdrop = document.getElementById('sidebar-backdrop');
+            if (sidebar) sidebar.classList.add('open');
+            if (backdrop) backdrop.classList.add('active');
+        },
+
+        closeSidebar: function() {
+            var sidebar = document.getElementById('sidebar');
+            var backdrop = document.getElementById('sidebar-backdrop');
+            if (sidebar) sidebar.classList.remove('open');
+            if (backdrop) backdrop.classList.remove('active');
+        },
 
         init: function() {
             var self = this;
+
+            // Fechar sidebar ao clicar no backdrop
+            var backdrop = document.getElementById('sidebar-backdrop');
+            if (backdrop) {
+                backdrop.addEventListener('click', function() {
+                    self.closeSidebar();
+                });
+            }
 
             // Eventos do Menu Lateral
             var navButtons = document.querySelectorAll('#sidebar .nav-item');
@@ -1542,8 +1645,10 @@
 
                         if (action === 'reload') {
                             self.reloadCurrentView();
+                            self.closeSidebar();
                         } else if (view) {
                             self.showView(view);
+                            self.closeSidebar();
                         }
                     });
                 })(navButtons[i]);
@@ -1582,6 +1687,7 @@
 
         showView: function(viewName) {
             this.currentView = viewName;
+            this.closeSidebar();
 
             // Atualizar classes ativas na sidebar
             var navButtons = document.querySelectorAll('#sidebar .nav-item');
@@ -1608,7 +1714,9 @@
 
             // Ações específicas da tela
             if (viewName === 'home') {
-                // Já carregado ou recarregar se vazio
+                var activeView = document.querySelector('.view-section.active');
+                var first = activeView ? activeView.querySelector('.focusable:not([disabled])') : null;
+                if (first) Nav.focus(first);
             } else if (viewName === 'creators') {
                 this.loadAllCreators();
             } else if (viewName === 'search') {
@@ -1616,6 +1724,13 @@
                 if (firstKey) Nav.focus(firstKey);
             } else if (viewName === 'account') {
                 this.updateAccountView();
+                var logoutBtn = document.getElementById('account-logout-btn');
+                var emailInput = document.getElementById('login-email');
+                if (logoutBtn && logoutBtn.offsetParent !== null) {
+                    Nav.focus(logoutBtn);
+                } else if (emailInput && emailInput.offsetParent !== null) {
+                    Nav.focus(emailInput);
+                }
             }
         },
 
@@ -1647,16 +1762,15 @@
             this.homeSeq++;
             var currentSeq = this.homeSeq;
 
-            var prevFocused = document.activeElement;
+            var prevFocused = Nav.currentFocus;
+            var prevVideoId = (prevFocused && prevFocused.getAttribute) ? prevFocused.getAttribute('data-video-id') : null;
 
             // 1. Criadores em Destaque
             Api.getRelevantCreators(1, 15)
                 .then(function(res) {
                     if (currentSeq !== self.homeSeq) return;
                     self.renderCreatorsCarousel(res.data || [], 'home-creators-carousel');
-                    if (prevFocused && document.contains(prevFocused) && prevFocused.classList.contains('focusable')) {
-                        Nav.focus(prevFocused);
-                    }
+                    self.recoverHomeFocus(prevFocused, prevVideoId);
                 })
                 .catch(function(err) {
                     if (currentSeq !== self.homeSeq) return;
@@ -1664,16 +1778,28 @@
                     if (c) c.innerHTML = '<p style="color:#e74c3c;">Erro ao carregar criadores.</p>';
                 });
 
-            // 2. Vídeos Gratuitos
-            Api.getFreeVideos(1, 10)
+            // 2. Em Alta no Cinefy (Trending)
+            var carouselTargetId = document.getElementById('home-trending-carousel') ? 'home-trending-carousel' : 'home-free-carousel';
+            Api.getTrendingVideos(1, 15)
                 .then(function(res) {
                     if (currentSeq !== self.homeSeq) return;
-                    self.renderVideosHorizontal(res.data || [], 'home-free-carousel');
+                    self.renderVideosHorizontal(res.data || [], carouselTargetId);
+                    self.recoverHomeFocus(prevFocused, prevVideoId);
                 })
                 .catch(function(err) {
                     if (currentSeq !== self.homeSeq) return;
-                    var f = document.getElementById('home-free-carousel');
-                    if (f) f.innerHTML = '<p style="color:#a0a0b0;">Nenhum vídeo gratuito no momento.</p>';
+                    // Fallback para getRecentVideos se endpoint de trending falhar
+                    Api.getRecentVideos(1, 10)
+                        .then(function(resRecent) {
+                            if (currentSeq !== self.homeSeq) return;
+                            self.renderVideosHorizontal(resRecent.data || [], carouselTargetId);
+                            self.recoverHomeFocus(prevFocused, prevVideoId);
+                        })
+                        .catch(function() {
+                            if (currentSeq !== self.homeSeq) return;
+                            var f = document.getElementById(carouselTargetId);
+                            if (f) f.innerHTML = '<p style="color:#a0a0b0;">Nenhum vídeo em alta no momento.</p>';
+                        });
                 });
 
             // 3. Vídeos Recentes
@@ -1682,6 +1808,7 @@
                     if (currentSeq !== self.homeSeq) return;
                     self.renderVideosGrid(res.data || [], 'home-videos-grid');
                     self.isLoadingHome = false;
+                    self.recoverHomeFocus(prevFocused, prevVideoId);
                 })
                 .catch(function(err) {
                     if (currentSeq !== self.homeSeq) return;
@@ -1689,6 +1816,36 @@
                     if (g) g.innerHTML = '<p style="color:#e74c3c;">Erro ao carregar vídeos recentes.</p>';
                     self.isLoadingHome = false;
                 });
+        },
+
+        recoverHomeFocus: function(prevFocused, prevVideoId) {
+            // Se o elemento em foco ainda existe no DOM e está válido, manter
+            if (Nav.currentFocus && document.contains(Nav.currentFocus) && Nav.currentFocus.classList.contains('focused') && !Nav.currentFocus.classList.contains('nav-item')) {
+                return;
+            }
+            // Restaurar por data-video-id se aplicável
+            if (prevVideoId) {
+                var match = document.querySelector('.video-card[data-video-id="' + prevVideoId + '"]');
+                if (match) {
+                    Nav.focus(match);
+                    return;
+                }
+            }
+            // Restaurar elemento anterior se ainda estiver no DOM
+            if (prevFocused && document.contains(prevFocused) && prevFocused.classList.contains('focusable') && !prevFocused.classList.contains('nav-item')) {
+                Nav.focus(prevFocused);
+                return;
+            }
+            // Se foco foi perdido ou era nav-item sem sidebar aberta, focar primeiro card da tela
+            if (!Nav.currentFocus || !document.contains(Nav.currentFocus) || (!UI.isSidebarOpen() && Nav.currentFocus.classList.contains('nav-item'))) {
+                var activeView = document.querySelector('.view-section.active');
+                if (activeView) {
+                    var firstCard = activeView.querySelector('.focusable:not([disabled])');
+                    if (firstCard) {
+                        Nav.focus(firstCard);
+                    }
+                }
+            }
         },
 
         loadAllCreators: function(isBackground) {
@@ -1706,6 +1863,10 @@
                 .then(function(res) {
                     if (currentSeq !== self.creatorsSeq) return;
                     self.renderCreatorsCarousel(res.data || [], 'all-creators-grid');
+                    if (!Nav.currentFocus || !document.contains(Nav.currentFocus) || Nav.currentFocus.classList.contains('nav-item')) {
+                        var firstCreator = container.querySelector('.creator-card.focusable');
+                        if (firstCreator) Nav.focus(firstCreator);
+                    }
                 })
                 .catch(function(err) {
                     if (currentSeq !== self.creatorsSeq) return;
