@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>Live Cinefy TV</title>
+    <style>
+        html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #000; color: #fff; font: 20px Arial, sans-serif; }
+        #status { position: absolute; top: 42%; left: 5%; width: 90%; text-align: center; color: #ddd; }
+        #player { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; background: #000; }
+    </style>
+</head>
+<body>
+    <div id="status">Carregando a transmissão…</div>
+    <script>
+        (function () {
+            'use strict';
+            var match = /(?:^|&)channel=([^&]*)/.exec((window.location.search || '').replace(/^\?/, ''));
+            var channel = '';
+            try { channel = match ? decodeURIComponent(match[1].replace(/\+/g, '%20')) : ''; } catch (e) { channel = ''; }
+            if (!/^[a-zA-Z0-9_]{1,25}$/.test(channel)) {
+                document.getElementById('status').textContent = 'Canal da Twitch inválido.';
+                return;
+            }
+            var frame = document.createElement('iframe');
+            frame.id = 'player';
+            frame.title = 'Live da Twitch';
+            frame.setAttribute('allowfullscreen', 'true');
+            frame.setAttribute('allow', 'autoplay; fullscreen; picture-in-picture');
+            frame.src = 'https://player.twitch.tv/?channel=' + encodeURIComponent(channel) +
+                '&parent=euoliveiraeric.github.io&autoplay=true&muted=false';
+            document.body.appendChild(frame);
+            document.getElementById('status').style.display = 'none';
+        }());
+    </script>
+</body>
+</html>
